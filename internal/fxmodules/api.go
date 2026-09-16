@@ -10,7 +10,6 @@ import (
 	apiauth "github.com/jeffotoni/jungle-backend-challenge/cmd/api/auth"
 	apiconfig "github.com/jeffotoni/jungle-backend-challenge/cmd/api/config"
 	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/handlers"
-	apirepository "github.com/jeffotoni/jungle-backend-challenge/cmd/api/repository"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
 	appwager "github.com/jeffotoni/jungle-backend-challenge/internal/application/wagering"
 	appwallet "github.com/jeffotoni/jungle-backend-challenge/internal/application/wallet"
@@ -40,9 +39,9 @@ var API = fx.Module(
 			return level == string(log.DEBUG) || level == string(log.TRACE)
 		},
 		func(lc fx.Lifecycle) (*pgxpool.Pool, error) { return postgres.NewPool(lc, apiconfig.DATABASE_URL) },
-		apirepository.NewStore,
-		func(store *apirepository.Store) ports.WalletStore { return store },
-		func(store *apirepository.Store) ports.WagerStore { return store },
+		postgres.NewStore,
+		func(store *postgres.Store) ports.WalletStore { return store },
+		func(store *postgres.Store) ports.WagerStore { return store },
 		postgres.NewTxManager,
 		func() *apiauth.Verifier {
 			return apiauth.NewVerifier(apiconfig.OIDC_ISSUER, apiconfig.OIDC_AUDIENCE, apiconfig.OIDC_INTERNAL_ROLE)

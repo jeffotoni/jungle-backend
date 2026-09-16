@@ -4,8 +4,8 @@ import (
 	"net/http"
 
 	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/models"
-	apirepository "github.com/jeffotoni/jungle-backend-challenge/cmd/api/repository"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
+	apirepository "github.com/jeffotoni/jungle-backend-challenge/internal/repository/postgres"
 	"github.com/jeffotoni/quick"
 )
 

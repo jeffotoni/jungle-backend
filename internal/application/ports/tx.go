@@ -47,6 +47,13 @@ type WagerRecord struct {
 	UpdatedAt                      time.Time
 }
 
+type InboxRecord struct {
+	ConsumerName string
+	MessageID    string
+	PayloadHash  string
+	Status       string
+}
+
 type LedgerRecord struct {
 	ID            string
 	WalletID      string
@@ -79,4 +86,10 @@ type WagerStore interface {
 	UpdateWager(context.Context, pgx.Tx, WagerRecord) error
 	InsertLedger(context.Context, pgx.Tx, LedgerRecord) error
 	InsertOutbox(context.Context, pgx.Tx, string, string, string, []byte) error
+}
+
+type InboxStore interface {
+	FindInbox(context.Context, pgx.Tx, string, string) (InboxRecord, error)
+	InsertInbox(context.Context, pgx.Tx, InboxRecord) (bool, error)
+	CompleteInbox(context.Context, pgx.Tx, string, string) error
 }

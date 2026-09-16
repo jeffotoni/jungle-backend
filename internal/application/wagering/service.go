@@ -34,6 +34,39 @@ func NewService(tx ports.TxManager, wallets ports.WalletStore, wagers ports.Wage
 }
 
 func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (Result, error) {
+	request, base, amount, err := prepareRequest(request)
+	if err != nil {
+		return Result{}, err
+	}
+
+	var result Result
+	err = s.tx.WithinTx(ctx, func(tx pgx.Tx) error {
+		return s.processTx(ctx, tx, request, base, amount, &result)
+	})
+	if errors.Is(err, ports.ErrUniqueViolation) {
+		return Result{}, application.ErrConflict
+	}
+	return result, err
+}
+
+func (s *Service) ProcessInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	request contracts.WagerRequest,
+) (Result, error) {
+	request, base, amount, err := prepareRequest(request)
+	if err != nil {
+		return Result{}, err
+	}
+	var result Result
+	err = s.processTx(ctx, tx, request, base, amount, &result)
+	if errors.Is(err, ports.ErrUniqueViolation) {
+		return Result{}, application.ErrConflict
+	}
+	return result, err
+}
+
+func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, ports.WagerRecord, money.Money, error) {
 	request.ProviderID = strings.TrimSpace(request.ProviderID)
 	request.ExternalTransactionID = strings.TrimSpace(request.ExternalTransactionID)
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
@@ -51,10 +84,10 @@ func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (
 		request.PlayerID == "" ||
 		request.RoundID == "" ||
 		request.GameID == "" {
-		return Result{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
 	}
 	if _, err := uuid.Parse(request.WalletID); err != nil {
-		return Result{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
 	}
 	kind := wager.Kind(request.Kind)
 	if kind != wager.KindBet &&
@@ -62,30 +95,30 @@ func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (
 		kind != wager.KindLoss &&
 		kind != wager.KindRefund &&
 		kind != wager.KindRollback {
-		return Result{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
 	}
 	amount, err := money.Parse(request.Money.Amount, request.Money.Currency)
 	if err != nil ||
 		amount.Amount < 0 ||
 		(kind == wager.KindLoss && amount.Amount != 0) ||
 		(kind != wager.KindLoss && amount.Amount == 0) {
-		return Result{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
 	}
 	if (kind == wager.KindRefund || kind == wager.KindRollback) &&
 		(request.ReferenceExternalTransactionID == nil ||
 			strings.TrimSpace(*request.ReferenceExternalTransactionID) == "") {
-		return Result{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
 	}
 	if request.ReferenceExternalTransactionID != nil {
 		value := strings.TrimSpace(*request.ReferenceExternalTransactionID)
 		request.ReferenceExternalTransactionID = &value
 		if value == "" || (kind != wager.KindWin && kind != wager.KindRefund && kind != wager.KindRollback) {
-			return Result{}, application.ErrInvalid
+			return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
 		}
 	}
 	hash, err := contracts.CanonicalHash(request)
 	if err != nil {
-		return Result{}, err
+		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, err
 	}
 	transactionID := uuid.NewString()
 	providerID := request.ProviderID
@@ -107,8 +140,49 @@ func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (
 		Status:                         wager.StatusPending,
 		PayloadHash:                    hash,
 	}
-	var result Result
-	err = s.tx.WithinTx(ctx, func(tx pgx.Tx) error {
+	return request, base, amount, nil
+}
+
+func (s *Service) processTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	request contracts.WagerRequest,
+	base ports.WagerRecord,
+	amount money.Money,
+	result *Result,
+) error {
+	providerID := request.ProviderID
+	externalID := request.ExternalTransactionID
+	idempotencyKey := request.IdempotencyKey
+	for _, found := range []func(context.Context, pgx.Tx) (ports.WagerRecord, error){
+		func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
+			return s.wagers.FindByIdempotency(ctx, tx, providerID, idempotencyKey)
+		},
+		func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
+			return s.wagers.FindByBusiness(ctx, tx, providerID, externalID)
+		},
+	} {
+		existing, findErr := found(ctx, tx)
+		if findErr == nil {
+			var err error
+			*result, err = replayOrConflict(existing, base.PayloadHash)
+			return err
+		}
+		if !errors.Is(findErr, pgx.ErrNoRows) {
+			return findErr
+		}
+	}
+	if _, lockErr := s.wallets.LockWallet(ctx, tx, request.WalletID); lockErr != nil {
+		if errors.Is(lockErr, pgx.ErrNoRows) {
+			return application.ErrNotFound
+		}
+		return lockErr
+	}
+	inserted, err := s.wagers.InsertWager(ctx, tx, base)
+	if err != nil {
+		return err
+	}
+	if !inserted {
 		for _, found := range []func(context.Context, pgx.Tx) (ports.WagerRecord, error){
 			func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
 				return s.wagers.FindByIdempotency(ctx, tx, providerID, idempotencyKey)
@@ -119,47 +193,14 @@ func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (
 		} {
 			existing, findErr := found(ctx, tx)
 			if findErr == nil {
-				result, err = replayOrConflict(existing, hash)
+				var err error
+				*result, err = replayOrConflict(existing, base.PayloadHash)
 				return err
 			}
-			if !errors.Is(findErr, pgx.ErrNoRows) {
-				return findErr
-			}
 		}
-		// Lock the parent wallet before inserting child rows to avoid FK lock inversion.
-		if _, lockErr := s.wallets.LockWallet(ctx, tx, request.WalletID); lockErr != nil {
-			if errors.Is(lockErr, pgx.ErrNoRows) {
-				return application.ErrNotFound
-			}
-			return lockErr
-		}
-		inserted, err := s.wagers.InsertWager(ctx, tx, base)
-		if err != nil {
-			return err
-		}
-		if !inserted {
-			for _, found := range []func(context.Context, pgx.Tx) (ports.WagerRecord, error){
-				func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
-					return s.wagers.FindByIdempotency(ctx, tx, providerID, idempotencyKey)
-				},
-				func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
-					return s.wagers.FindByBusiness(ctx, tx, providerID, externalID)
-				},
-			} {
-				existing, findErr := found(ctx, tx)
-				if findErr == nil {
-					result, err = replayOrConflict(existing, hash)
-					return err
-				}
-			}
-			return application.ErrConflict
-		}
-		return s.apply(ctx, tx, base, amount, &result)
-	})
-	if errors.Is(err, ports.ErrUniqueViolation) {
-		return Result{}, application.ErrConflict
+		return application.ErrConflict
 	}
-	return result, err
+	return s.apply(ctx, tx, base, amount, result)
 }
 
 func (s *Service) Get(ctx context.Context, providerID, transactionID string) (Result, error) {

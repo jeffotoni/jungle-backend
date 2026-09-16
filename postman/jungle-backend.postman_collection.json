@@ -1,0 +1,165 @@
+{
+  "info": {
+    "_postman_id": "7b29b0be-4b38-4a84-9b4c-3d6c2f31b7f1",
+    "name": "Jungle Backend API",
+    "description": "Collection das rotas HTTP expostas por cmd/api. Configure os tokens OIDC nas variáveis da collection antes de executar as rotas protegidas.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080", "type": "string" },
+    { "key": "oidcIssuer", "value": "http://localhost:8081/realms/jungle", "type": "string" },
+    { "key": "keycloakTokenUrl", "value": "{{oidcIssuer}}/protocol/openid-connect/token", "type": "string" },
+    { "key": "internalClientId", "value": "wallet-internal", "type": "string" },
+    { "key": "internalClientSecret", "value": "INTERNAL_CLIENT_SECRET", "type": "string" },
+    { "key": "providerClientId", "value": "provider-a", "type": "string" },
+    { "key": "providerClientSecret", "value": "PROVIDER_CLIENT_SECRET", "type": "string" },
+    { "key": "internalToken", "value": "", "type": "string" },
+    { "key": "providerToken", "value": "", "type": "string" },
+    { "key": "walletId", "value": "516be6a5-8338-4560-a723-0fc1e6e6e801", "type": "string" },
+    { "key": "transactionId", "value": "", "type": "string" },
+    { "key": "providerId", "value": "provider-a", "type": "string" },
+    { "key": "externalTransactionId", "value": "bet-ext-001", "type": "string" },
+    { "key": "cursor", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Authentication - Keycloak",
+      "description": "Equivalente aos curl do cmd/api/README.md para obter os tokens client_credentials.",
+      "item": [
+        {
+          "name": "POST Get internal token",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "client_credentials", "type": "text" },
+                { "key": "client_id", "value": "{{internalClientId}}", "type": "text" },
+                { "key": "client_secret", "value": "{{internalClientSecret}}", "type": "text" }
+              ]
+            },
+            "url": { "raw": "{{keycloakTokenUrl}}", "host": ["{{keycloakTokenUrl}}"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Token response is successful', function () {", "  pm.expect(pm.response.code).to.be.oneOf([200]);", "});", "if (pm.response.code === 200) {", "  const data = pm.response.json();", "  pm.collectionVariables.set('internalToken', data.access_token);", "}"] } }]
+        },
+        {
+          "name": "POST Get provider token",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "client_credentials", "type": "text" },
+                { "key": "client_id", "value": "{{providerClientId}}", "type": "text" },
+                { "key": "client_secret", "value": "{{providerClientSecret}}", "type": "text" }
+              ]
+            },
+            "url": { "raw": "{{keycloakTokenUrl}}", "host": ["{{keycloakTokenUrl}}"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Token response is successful', function () {", "  pm.expect(pm.response.code).to.be.oneOf([200]);", "});", "if (pm.response.code === 200) {", "  const data = pm.response.json();", "  pm.collectionVariables.set('providerToken', data.access_token);", "}"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "GET Health - Live",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health/live", "host": ["{{baseUrl}}"], "path": ["health", "live"] }
+          }
+        },
+        {
+          "name": "GET Health - Ready",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health/ready", "host": ["{{baseUrl}}"], "path": ["health", "ready"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wallets",
+      "item": [
+        {
+          "name": "POST Create wallet",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{internalToken}}", "type": "string" }] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"playerId\": \"player-001\",\n  \"initialBalance\": {\n    \"amount\": \"25.00\",\n    \"currency\": \"BRL\"\n  }\n}" },
+            "url": { "raw": "{{baseUrl}}/wallets", "host": ["{{baseUrl}}"], "path": ["wallets"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if (pm.response.code === 201) {", "  const data = pm.response.json();", "  if (data.id) pm.collectionVariables.set('walletId', data.id);", "}"] } }]
+        },
+        {
+          "name": "GET Get wallet",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{internalToken}}", "type": "string" }] },
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/wallets/{{walletId}}", "host": ["{{baseUrl}}"], "path": ["wallets", "{{walletId}}"] }
+          }
+        },
+        {
+          "name": "GET Wallet ledger",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{internalToken}}", "type": "string" }] },
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/wallets/{{walletId}}/ledger?cursor={{cursor}}&limit=50", "host": ["{{baseUrl}}"], "path": ["wallets", "{{walletId}}", "ledger"], "query": [{ "key": "cursor", "value": "{{cursor}}" }, { "key": "limit", "value": "50" }] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if (pm.response.code === 200) {", "  const data = pm.response.json();", "  if (data.nextCursor) pm.collectionVariables.set('cursor', data.nextCursor);", "}"] } }]
+        },
+        {
+          "name": "POST Reconcile wallet",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{internalToken}}", "type": "string" }] },
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/wallets/{{walletId}}/reconciliation", "host": ["{{baseUrl}}"], "path": ["wallets", "{{walletId}}", "reconciliation"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wagering",
+      "item": [
+        {
+          "name": "POST Process wager - BET",
+          "request": {
+            "method": "POST",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerToken}}", "type": "string" }] },
+            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Idempotency-Key", "value": "bet-001" }],
+            "body": { "mode": "raw", "raw": "{\n  \"providerId\": \"{{providerId}}\",\n  \"externalTransactionId\": \"bet-ext-001\",\n  \"walletId\": \"{{walletId}}\",\n  \"playerId\": \"player-001\",\n  \"roundId\": \"round-001\",\n  \"gameId\": \"game-001\",\n  \"kind\": \"BET\",\n  \"money\": {\n    \"amount\": \"10.00\",\n    \"currency\": \"BRL\"\n  }\n}" },
+            "url": { "raw": "{{baseUrl}}/wagering/transactions", "host": ["{{baseUrl}}"], "path": ["wagering", "transactions"] }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["if ([200, 202, 422, 503].includes(pm.response.code)) {", "  const data = pm.response.json();", "  if (data.transactionId) pm.collectionVariables.set('transactionId', data.transactionId);", "}"] } }]
+        },
+        {
+          "name": "GET Get wager by transaction ID",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerToken}}", "type": "string" }] },
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/wagering/transactions/{{transactionId}}", "host": ["{{baseUrl}}"], "path": ["wagering", "transactions", "{{transactionId}}"] }
+          }
+        },
+        {
+          "name": "GET Get wager by external transaction ID",
+          "request": {
+            "method": "GET",
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{providerToken}}", "type": "string" }] },
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/providers/{{providerId}}/wagering/transactions/{{externalTransactionId}}", "host": ["{{baseUrl}}"], "path": ["providers", "{{providerId}}", "wagering", "transactions", "{{externalTransactionId}}"] }
+          }
+        }
+      ]
+    }
+  ]
+}

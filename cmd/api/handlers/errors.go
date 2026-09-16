@@ -7,8 +7,8 @@ import (
 	"github.com/jeffotoni/quick"
 
 	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/models"
-	apirepository "github.com/jeffotoni/jungle-backend-challenge/cmd/api/repository"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application"
+	apirepository "github.com/jeffotoni/jungle-backend-challenge/internal/repository/postgres"
 )
 
 type httpError struct {
