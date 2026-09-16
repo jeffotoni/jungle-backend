@@ -54,6 +54,19 @@ type InboxRecord struct {
 	Status       string
 }
 
+type OutboxRecord struct {
+	ID            string
+	AggregateType string
+	AggregateID   string
+	EventType     string
+	Payload       []byte
+	Status        string
+	Attempts      int
+	NextAttemptAt *time.Time
+	PublishedAt   *time.Time
+	ClaimToken    string
+}
+
 type LedgerRecord struct {
 	ID            string
 	WalletID      string
@@ -92,4 +105,10 @@ type InboxStore interface {
 	FindInbox(context.Context, pgx.Tx, string, string) (InboxRecord, error)
 	InsertInbox(context.Context, pgx.Tx, InboxRecord) (bool, error)
 	CompleteInbox(context.Context, pgx.Tx, string, string) error
+}
+
+type OutboxStore interface {
+	ClaimOutbox(context.Context, pgx.Tx, int, string, time.Duration) ([]OutboxRecord, error)
+	MarkOutboxPublished(context.Context, pgx.Tx, string, string) error
+	MarkOutboxRetry(context.Context, pgx.Tx, string, string, time.Time) error
 }

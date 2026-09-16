@@ -37,3 +37,4 @@ func isUnique(err error) bool {
 var _ ports.WalletStore = (*Store)(nil)
 var _ ports.WagerStore = (*Store)(nil)
 var _ ports.InboxStore = (*Store)(nil)
+var _ ports.OutboxStore = (*Store)(nil)
