@@ -114,38 +114,94 @@ HTTP response
 
 All business endpoints require a bearer token. Internal wallet and reconciliation operations require the configured internal role. Wagering operations also require the authenticated provider to match `providerId`.
 
-## Local environment
+## First-time local setup
+
+Run these commands from the repository root.
+
+### 1. Start PostgreSQL, Keycloak and LocalStack
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Wait for the dependencies to become available:
+
+```bash
+until docker compose exec -T postgres pg_isready -U jungle -d jungle; do
+  sleep 2
+done
+
+until curl -fsS http://localhost:8081/realms/jungle/.well-known/openid-configuration >/dev/null; do
+  sleep 2
+done
+
+until curl -fsS http://localhost:4566/_localstack/health >/dev/null; do
+  sleep 2
+done
+```
+
+The local Keycloak realm imports the `wallet-internal` and `provider-a` confidential clients from `keycloak/realm-jungle.json`. The imported client secrets are `INTERNAL_CLIENT_SECRET` and `PROVIDER_CLIENT_SECRET`.
+
+### 2. Apply the database migrations
+
+Apply the migrations in order before using the financial endpoints:
+
+```bash
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  < migrations/000001_init.up.sql
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  < migrations/000002_api_financial_guarantees.up.sql
+```
+
+Confirm that the required tables exist:
+
+```bash
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "\dt"
+```
+
+The following tables should appear:
+
+- `wallets`
+- `wager_transactions`
+- `ledger_entries`
+- `inbox_messages`
+- `outbox_events`
+
+### 3. Configure the API environment
+
+Use the following variables in the terminal where the API will run:
 
 ```bash
 export API=http://localhost:8080
-export OIDC_ISSUER=http://localhost:8081/realms/jungle
-export OIDC_AUDIENCE=jungle-api
-export KEYCLOAK_TOKEN_URL="$OIDC_ISSUER/protocol/openid-connect/token"
-export INTERNAL_CLIENT_ID=wallet-internal
-export INTERNAL_CLIENT_SECRET=INTERNAL_CLIENT_SECRET
-export PROVIDER_CLIENT_ID=provider-a
-export PROVIDER_CLIENT_SECRET=PROVIDER_CLIENT_SECRET
-```
-
-# Terminal 1: configure and start the API.
-
-The API process must use the same OIDC values:
-
-```bash
 export HTTP_ADDR=:8080
 export DATABASE_URL="postgres://jungle:jungle@localhost:5432/jungle?sslmode=disable"
 export OIDC_ISSUER=http://localhost:8081/realms/jungle
 export OIDC_AUDIENCE=jungle-api
 export OIDC_INTERNAL_ROLE=wallet-internal
+export TRACE_ID=traceId
 export LOG_LEVEL=DEBUG
+```
+
+### 4. Start the API
+
+In Terminal 1:
+
+```bash
 go run ./cmd/api
 ```
 
-The local Keycloak realm imports the `wallet-internal` and `provider-a` confidential clients from `keycloak/realm-jungle.json`. The imported client secrets are `INTERNAL_CLIENT_SECRET` and `PROVIDER_CLIENT_SECRET`.
+### 5. Obtain Keycloak tokens
 
-# Terminal 2: configure the token request and obtain the tokens.
-
-Install `jq` and execute this complete block in the second terminal. Shell exports are local to each terminal:
+Install `jq` and run this block in Terminal 2. Shell exports are local to each terminal:
 
 ```bash
 export API=http://localhost:8080
@@ -173,6 +229,15 @@ export PROVIDER_TOKEN="$(curl -fsS -X POST "$KEYCLOAK_TOKEN_URL" \
 ```
 
 The internal token contains the `wallet-internal` role. The provider token has provider identity `provider-a`, so wagering requests must use `"providerId": "provider-a"`.
+
+### 6. Run the first API smoke test
+
+```bash
+curl -i "$API/health/live"
+curl -i "$API/health/ready"
+```
+
+After the health checks succeed, use the authenticated examples below.
 
 ## POST examples
 
@@ -407,19 +472,22 @@ internal/fxmodules/    Uber Fx composition for the API process.
 
 The Consumer and Publisher are independent processes. The Consumer will process SQS messages using the same application use cases as the API, while the Publisher will publish committed outbox events. They are not started by `cmd/api`.
 
-## Local prerequisites
+## Reset local PostgreSQL
 
-PostgreSQL, Keycloak and LocalStack/SQS are provided by the project Docker Compose. The Compose file imports the local `jungle` realm and its test clients when Keycloak starts.
-
-Start the local infrastructure:
+Use this procedure when the local PostgreSQL database must be completely cleared and recreated. It removes the `postgres_data` Docker volume and all data stored in it.
 
 ```bash
-docker compose up -d
+docker compose down -v
+docker compose up -d postgres
 ```
 
-Apply the database migrations in order before using the financial endpoints:
+Wait for PostgreSQL and apply the migrations again:
 
 ```bash
+until docker compose exec -T postgres pg_isready -U jungle -d jungle; do
+  sleep 2
+done
+
 docker compose exec -T postgres psql \
   -U jungle \
   -d jungle \
@@ -431,21 +499,10 @@ docker compose exec -T postgres psql \
   < migrations/000002_api_financial_guarantees.up.sql
 ```
 
-Confirm that the required tables exist:
+Start Keycloak and LocalStack again if they are not running:
 
 ```bash
-docker compose exec -T postgres psql \
-  -U jungle \
-  -d jungle \
-  -c "\dt"
+docker compose up -d keycloak localstack
 ```
 
-The following tables should appear:
-
-- `wallets`
-- `wager_transactions`
-- `ledger_entries`
-- `inbox_messages`
-- `outbox_events`
-
-The API configuration is provided through environment variables, including `HTTP_ADDR`, `DATABASE_URL`, `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_INTERNAL_ROLE`, `TRACE_ID` and `LOG_LEVEL`.
+Then repeat the environment setup, API startup and token commands from the first-time setup above.
