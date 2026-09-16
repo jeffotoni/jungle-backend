@@ -1,6 +1,8 @@
 package fxmodules
 
 import (
+	"strings"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jeffotoni/log"
 	"go.uber.org/fx"
@@ -32,6 +34,10 @@ var API = fx.Module(
 		},
 		func() httpserver.TraceKey {
 			return httpserver.TraceKey(apiconfig.TRACE_ID)
+		},
+		func() bool {
+			level := strings.ToUpper(strings.TrimSpace(apiconfig.LOG_LEVEL))
+			return level == string(log.DEBUG) || level == string(log.TRACE)
 		},
 		func(lc fx.Lifecycle) (*pgxpool.Pool, error) { return postgres.NewPool(lc, apiconfig.DATABASE_URL) },
 		apirepository.NewStore,

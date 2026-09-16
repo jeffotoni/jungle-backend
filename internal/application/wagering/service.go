@@ -126,6 +126,13 @@ func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (
 				return findErr
 			}
 		}
+		// Lock the parent wallet before inserting child rows to avoid FK lock inversion.
+		if _, lockErr := s.wallets.LockWallet(ctx, tx, request.WalletID); lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return application.ErrNotFound
+			}
+			return lockErr
+		}
 		inserted, err := s.wagers.InsertWager(ctx, tx, base)
 		if err != nil {
 			return err

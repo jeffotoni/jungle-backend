@@ -22,7 +22,14 @@ type Server struct {
 
 type TraceKey string
 
-func NewServer(lc fx.Lifecycle, address string, router *quick.Quick, logger *jlog.Logger, traceKey TraceKey) *Server {
+func NewServer(
+	lc fx.Lifecycle,
+	address string,
+	router *quick.Quick,
+	logger *jlog.Logger,
+	traceKey TraceKey,
+	captureDetails bool,
+) *Server {
 	srv := &Server{
 		router:  router,
 		address: address,
@@ -31,7 +38,11 @@ func NewServer(lc fx.Lifecycle, address string, router *quick.Quick, logger *jlo
 
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
-			handler := HTTPMiddleware(srv.logger, string(traceKey))(srv.router.Handler())
+			handler := HTTPMiddleware(
+				srv.logger,
+				string(traceKey),
+				captureDetails,
+			)(srv.router.Handler())
 			_, shutdown, err := srv.router.ListenWithShutdown(srv.address, handler)
 			if err != nil {
 				return fmt.Errorf("start HTTP server: %w", err)
