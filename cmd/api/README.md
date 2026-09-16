@@ -52,6 +52,123 @@ COMMIT
 HTTP response
 ```
 
+### Wallet creation outcomes
+
+```text
+POST /wallets
+      |
+      v
+Authentication and request validation
+      |
+      +--> invalid token --------------------------> 401 UNAUTHORIZED
+      |
+      +--> valid token without internal role ------> 403 FORBIDDEN
+      |
+      +--> invalid payload or money ---------------> 400 INVALID_REQUEST
+      |
+      v
+PostgreSQL transaction
+      |
+      +--> (playerId, currency) already exists
+      |         |
+      |         +--> ROLLBACK
+      |                  |
+      |                  +--> 409 CONFLICT
+      |                  +--> no wallet, ledger or outbox event is created
+      |
+      +--> new wallet
+                |
+                +--> INSERT wallet
+                +--> INSERT OPENING when initial balance is greater than zero
+                +--> INSERT ledger CREDIT when applicable
+                +--> INSERT outbox events
+                +--> COMMIT
+                +--> 201 CREATED
+```
+
+`POST /wallets` uses the unique `(playerId, currency)` identity. A conflict does not modify the existing wallet and does not leave partial records from the failed transaction.
+
+### Wagering transaction outcomes
+
+```text
+POST /wagering/transactions
+      |
+      v
+Authentication, provider isolation and request validation
+      |
+      +--> invalid or expired token ----------------------> 401 UNAUTHORIZED
+      |
+      +--> token provider differs from providerId --------> 403 FORBIDDEN
+      |
+      +--> missing Idempotency-Key or invalid payload ----> 400 INVALID_REQUEST
+      |
+      v
+Persistent idempotency and business deduplication
+      |
+      +--> same key + same canonical payload
+      |         +--> replay original result
+      |         +--> 200 OK
+      |         +--> no second financial effect
+      |
+      +--> same key + different payload
+      |         +--> ROLLBACK
+      |         +--> 409 CONFLICT
+      |         +--> no financial state change
+      |
+      +--> same provider + external transaction identity
+      |         +--> ROLLBACK or return the existing business result
+      |         +--> no duplicate financial effect
+      |
+      v
+PostgreSQL transaction with wallet lock
+      |
+      +--> reference is not available
+      |         +--> persist PENDING_REFERENCE
+      |         +--> insert pending-reference outbox event
+      |         +--> COMMIT
+      |         +--> 202 ACCEPTED
+      |
+      +--> business rule rejects the operation
+      |         +--> persist REJECTED transaction and failureCode
+      |         +--> insert WagerTransactionRejected event
+      |         +--> COMMIT
+      |         +--> 422 UNPROCESSABLE ENTITY
+      |
+      +--> valid financial operation
+                |
+                +--> update wallet balance
+                +--> insert wagering transaction
+                +--> insert ledger entry when applicable
+                +--> insert outbox events
+                +--> COMMIT
+                +--> 200 OK
+```
+
+The successful wagering flow updates the wallet, wager transaction, ledger and outbox in one PostgreSQL transaction. If any persistence step fails, the transaction is rolled back and no partial financial effect remains.
+
+For a successful `BET`, `WIN`, `REFUND` or `ROLLBACK`, the response is `200 OK`. `LOSS` also returns `200 OK`, but does not change the balance, create a ledger entry or emit `WalletBalanceChanged`.
+
+`PENDING_REFERENCE` returns `202 ACCEPTED`; the pending transaction can be retried by the pending-reference worker. `REJECTED` returns `422 UNPROCESSABLE ENTITY`. A failed dependency or unavailable authentication provider returns `503 SERVICE UNAVAILABLE`.
+
+### Read and reconciliation outcomes
+
+```text
+GET /wallets/:walletId
+GET /wallets/:walletId/ledger
+GET /wagering/transactions/:transactionId
+GET /providers/:providerId/wagering/transactions/:externalTransactionId
+POST /wallets/:walletId/reconciliation
+      |
+      +--> valid request and found resource -----------> 200 OK
+      +--> invalid UUID, cursor or query --------------> 400 INVALID_REQUEST
+      +--> missing or invalid token -------------------> 401 UNAUTHORIZED
+      +--> insufficient role or provider isolation ----> 403 FORBIDDEN
+      +--> resource does not exist --------------------> 404 NOT_FOUND
+      +--> unavailable required dependency ------------> 503 SERVICE UNAVAILABLE
+```
+
+Reconciliation only compares the wallet balance with the append-only ledger. It does not mutate the wallet balance.
+
 Authentication, authorization and idempotency validation are currently performed at the handler boundary. The request logging middleware is provided by the HTTP server platform layer.
 
 ### Read flow
