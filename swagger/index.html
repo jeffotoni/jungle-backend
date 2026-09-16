@@ -1,0 +1,547 @@
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.19.5/swagger-ui.css" >
+    <style>
+      .topbar {
+        display: none;
+      }
+    </style>
+    <script type="text/javascript">
+var spec = {
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Jungle Backend API",
+        "description": "Collection das rotas HTTP expostas por cmd/api. Configure os tokens OIDC nas variáveis da collection antes de executar as rotas protegidas.",
+        "version": "1.0.0",
+        "contact": {}
+    },
+    "servers": [
+        {
+            "url": "http://localhost:8081"
+        },
+        {
+            "url": "http://localhost:8080"
+        }
+    ],
+    "paths": {
+        "/realms/jungle/protocol/openid-connect/token": {
+            "post": {
+                "servers": [
+                    {
+                        "url": "http://localhost:8081"
+                    }
+                ],
+                "tags": [
+                    "Authentication - Keycloak"
+                ],
+                "summary": "POST Get internal token",
+                "description": "POST Get internal token",
+                "operationId": "postGetInternalToken",
+                "requestBody": {
+                    "content": {
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "client_id": {
+                                        "type": "string",
+                                        "example": "{{providerClientId}}"
+                                    },
+                                    "client_secret": {
+                                        "type": "string",
+                                        "example": "{{providerClientSecret}}"
+                                    },
+                                    "grant_type": {
+                                        "type": "string",
+                                        "example": "client_credentials"
+                                    }
+                                }
+                            },
+                            "examples": {
+                                "POST Get internal token": {
+                                    "value": {
+                                        "client_id": "{{internalClientId}}",
+                                        "client_secret": "{{internalClientSecret}}",
+                                        "grant_type": "client_credentials"
+                                    }
+                                },
+                                "POST Get provider token": {
+                                    "value": {
+                                        "client_id": "{{providerClientId}}",
+                                        "client_secret": "{{providerClientSecret}}",
+                                        "grant_type": "client_credentials"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/health/live": {
+            "get": {
+                "tags": [
+                    "Health"
+                ],
+                "summary": "GET Health - Live",
+                "description": "GET Health - Live",
+                "operationId": "getHealthLive",
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/health/ready": {
+            "get": {
+                "tags": [
+                    "Health"
+                ],
+                "summary": "GET Health - Ready",
+                "description": "GET Health - Ready",
+                "operationId": "getHealthReady",
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/wallets": {
+            "post": {
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "POST Create wallet",
+                "description": "POST Create wallet",
+                "operationId": "postCreateWallet",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "initialBalance": {
+                                        "type": "object",
+                                        "properties": {
+                                            "amount": {
+                                                "type": "string",
+                                                "example": "25.00"
+                                            },
+                                            "currency": {
+                                                "type": "string",
+                                                "example": "BRL"
+                                            }
+                                        }
+                                    },
+                                    "playerId": {
+                                        "type": "string",
+                                        "example": "player-001"
+                                    }
+                                }
+                            },
+                            "examples": {
+                                "POST Create wallet": {
+                                    "value": {
+                                        "initialBalance": {
+                                            "amount": "25.00",
+                                            "currency": "BRL"
+                                        },
+                                        "playerId": "player-001"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/wallets/{walletId}": {
+            "get": {
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "GET Get wallet",
+                "description": "GET Get wallet",
+                "operationId": "getGetWallet",
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "walletId",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ]
+        },
+        "/wallets/{walletId}/ledger": {
+            "get": {
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "GET Wallet ledger",
+                "description": "GET Wallet ledger",
+                "operationId": "getWalletLedger",
+                "parameters": [
+                    {
+                        "name": "cursor",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "example": "{{cursor}}"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "example": "50"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "walletId",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ]
+        },
+        "/wallets/{walletId}/reconciliation": {
+            "post": {
+                "tags": [
+                    "Wallets"
+                ],
+                "summary": "POST Reconcile wallet",
+                "description": "POST Reconcile wallet",
+                "operationId": "postReconcileWallet",
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "walletId",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ]
+        },
+        "/wagering/transactions": {
+            "post": {
+                "tags": [
+                    "Wagering"
+                ],
+                "summary": "POST Process wager - BET",
+                "description": "POST Process wager - BET",
+                "operationId": "postProcessWagerBet",
+                "parameters": [
+                    {
+                        "name": "idempotency-key",
+                        "in": "header",
+                        "schema": {
+                            "type": "string",
+                            "example": "bet-001"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "properties": {
+                                    "externalTransactionId": {
+                                        "type": "string",
+                                        "example": "bet-ext-001"
+                                    },
+                                    "gameId": {
+                                        "type": "string",
+                                        "example": "game-001"
+                                    },
+                                    "kind": {
+                                        "type": "string",
+                                        "example": "BET"
+                                    },
+                                    "money": {
+                                        "type": "object",
+                                        "properties": {
+                                            "amount": {
+                                                "type": "string",
+                                                "example": "10.00"
+                                            },
+                                            "currency": {
+                                                "type": "string",
+                                                "example": "BRL"
+                                            }
+                                        }
+                                    },
+                                    "playerId": {
+                                        "type": "string",
+                                        "example": "player-001"
+                                    },
+                                    "providerId": {
+                                        "type": "string",
+                                        "example": "{{providerId}}"
+                                    },
+                                    "roundId": {
+                                        "type": "string",
+                                        "example": "round-001"
+                                    },
+                                    "walletId": {
+                                        "type": "string",
+                                        "example": "{{walletId}}"
+                                    }
+                                }
+                            },
+                            "examples": {
+                                "POST Process wager - BET": {
+                                    "value": {
+                                        "externalTransactionId": "bet-ext-001",
+                                        "gameId": "game-001",
+                                        "kind": "BET",
+                                        "money": {
+                                            "amount": "10.00",
+                                            "currency": "BRL"
+                                        },
+                                        "playerId": "player-001",
+                                        "providerId": "{{providerId}}",
+                                        "roundId": "round-001",
+                                        "walletId": "{{walletId}}"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/wagering/transactions/{transactionId}": {
+            "get": {
+                "tags": [
+                    "Wagering"
+                ],
+                "summary": "GET Get wager by transaction ID",
+                "description": "GET Get wager by transaction ID",
+                "operationId": "getGetWagerByTransactionId",
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "transactionId",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ]
+        },
+        "/providers/{providerId}/wagering/transactions/{externalTransactionId}": {
+            "get": {
+                "tags": [
+                    "Wagering"
+                ],
+                "summary": "GET Get wager by external transaction ID",
+                "description": "GET Get wager by external transaction ID",
+                "operationId": "getGetWagerByExternalTransactionId",
+                "responses": {
+                    "200": {
+                        "description": ""
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "parameters": [
+                {
+                    "name": "providerId",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                },
+                {
+                    "name": "externalTransactionId",
+                    "in": "path",
+                    "required": true,
+                    "schema": {
+                        "type": "string"
+                    }
+                }
+            ]
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "scheme": "bearer"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "Authentication - Keycloak",
+            "description": "Equivalente aos curl do cmd/api/README.md para obter os tokens client_credentials."
+        },
+        {
+            "name": "Health"
+        },
+        {
+            "name": "Wallets"
+        },
+        {
+            "name": "Wagering"
+        }
+    ]
+}
+      </script>
+  </head>
+
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.19.5/swagger-ui-bundle.js"> </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/3.19.5/swagger-ui-standalone-preset.js"> </script>
+    <script src="https://code.jquery.com/jquery-3.7.1.slim.min.js"></script>
+    <script>
+      window.onload = function() {
+        const ui = SwaggerUIBundle({
+          spec: spec,
+          dom_id: '#swagger-ui',
+          deepLinking: true,
+          presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIStandalonePreset
+          ],
+          plugins: [
+            SwaggerUIBundle.plugins.DownloadUrl
+          ],
+          layout: "StandaloneLayout"
+        })
+     
+        window.ui = ui
+      }
+
+      $(document).ready(function () {
+        const DOMAIN_CLASS_LIST = {
+            'http://localhost:8081': 'keycloak-api',
+            'http://localhost:8080': 'main-api',
+        };
+
+        const KEYCLOAK_TAG_ID = 'operations-tag-Authentication%20-%20Keycloak';
+
+        function applyServerFilter() {
+            const sections = $('.wrapper > section > div > span');
+            const serverSelect = $('.servers > label > select');
+
+            if (!sections.length || !serverSelect.length) {
+                window.setTimeout(applyServerFilter, 100);
+                return;
+            }
+
+            sections.each(function (elIndex, elParent) {
+                const tagId = $(elParent)
+                    .children('.opblock-tag-section')
+                    .children('h4')
+                    .attr('id');
+
+                if (tagId === KEYCLOAK_TAG_ID) {
+                    $(elParent).addClass('keycloak-api');
+                } else {
+                    $(elParent).addClass('main-api');
+                }
+            });
+
+            const showClass = DOMAIN_CLASS_LIST[serverSelect.val()] || 'main-api';
+
+            sections.hide();
+            $('.' + showClass).show();
+        }
+
+        $(document).on('change', '.servers > label > select', function () {
+            applyServerFilter();
+        });
+
+        applyServerFilter();
+      });
+  </script>
+  </body>
+</html>
