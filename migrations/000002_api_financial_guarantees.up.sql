@@ -15,9 +15,15 @@ ALTER TABLE wager_transactions
     ALTER COLUMN external_transaction_id DROP NOT NULL,
     ALTER COLUMN round_id DROP NOT NULL,
     ALTER COLUMN game_id DROP NOT NULL,
+    ALTER COLUMN reference_transaction_id TYPE UUID
+        USING NULLIF(reference_transaction_id, '')::uuid,
     ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
     ADD COLUMN IF NOT EXISTS reference_external_transaction_id TEXT,
     ADD COLUMN IF NOT EXISTS failure_code TEXT;
+
+ALTER TABLE wager_transactions
+    ADD CONSTRAINT wager_reference_transaction_fk
+    FOREIGN KEY (reference_transaction_id) REFERENCES wager_transactions(id);
 
 ALTER TABLE wager_transactions
     ADD CONSTRAINT wager_kind_check CHECK (kind IN ('BET', 'WIN', 'LOSS', 'REFUND', 'ROLLBACK', 'OPENING')),

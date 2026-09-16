@@ -74,6 +74,10 @@ func (s *Store) InsertWager(ctx context.Context, tx pgx.Tx, record ports.WagerRe
 	if err != nil {
 		return false, err
 	}
+	referenceID, err := nullableUUID(record.ReferenceTransactionID)
+	if err != nil {
+		return false, err
+	}
 	var providerID, externalID, key any
 	if record.ProviderID != nil {
 		providerID = *record.ProviderID
@@ -105,7 +109,7 @@ func (s *Store) InsertWager(ctx context.Context, tx pgx.Tx, record ports.WagerRe
 		record.Amount,
 		record.Currency,
 		record.ReferenceExternalTransactionID,
-		record.ReferenceTransactionID,
+		referenceID,
 		string(record.Status),
 		record.PayloadHash,
 		record.ResultBalance,
@@ -120,11 +124,15 @@ func (s *Store) InsertWager(ctx context.Context, tx pgx.Tx, record ports.WagerRe
 }
 
 func (s *Store) UpdateWager(ctx context.Context, tx pgx.Tx, record ports.WagerRecord) error {
-	_, err := tx.Exec(ctx, `
+	referenceID, err := nullableUUID(record.ReferenceTransactionID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
 		UPDATE wager_transactions
 		SET reference_transaction_id = $2, status = $3, result_balance = $4,
 		    failure_code = $5, updated_at = now()
-		WHERE id = $1`, mustUUID(record.ID), record.ReferenceTransactionID,
+		WHERE id = $1`, mustUUID(record.ID), referenceID,
 		string(record.Status), record.ResultBalance, record.FailureCode)
 	return err
 }
@@ -132,7 +140,8 @@ func (s *Store) UpdateWager(ctx context.Context, tx pgx.Tx, record ports.WagerRe
 func (s *Store) scanWager(row pgx.Row) (ports.WagerRecord, error) {
 	var record ports.WagerRecord
 	var id, wallet uuid.UUID
-	var providerID, externalID, key, referenceExternalID, referenceID, failureCode *string
+	var providerID, externalID, key, referenceExternalID, failureCode *string
+	var referenceID *uuid.UUID
 	var kind, status string
 	if err := row.Scan(&id, &providerID, &externalID, &key, &wallet, &record.PlayerID, &record.RoundID,
 		&record.GameID, &kind, &record.Amount, &record.Currency,
@@ -146,7 +155,10 @@ func (s *Store) scanWager(row pgx.Row) (ports.WagerRecord, error) {
 	record.ExternalTransactionID = externalID
 	record.IdempotencyKey = key
 	record.ReferenceExternalTransactionID = referenceExternalID
-	record.ReferenceTransactionID = referenceID
+	if referenceID != nil {
+		value := referenceID.String()
+		record.ReferenceTransactionID = &value
+	}
 	record.FailureCode = failureCode
 	record.Kind = wager.Kind(kind)
 	record.Status = wager.Status(status)
@@ -158,4 +170,11 @@ func nullIf(value string) any {
 		return nil
 	}
 	return value
+}
+
+func nullableUUID(value *string) (any, error) {
+	if value == nil {
+		return nil, nil
+	}
+	return parseUUID(*value)
 }

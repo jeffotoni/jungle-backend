@@ -10,6 +10,11 @@ ALTER TABLE ledger_entries DROP COLUMN IF EXISTS direction;
 ALTER TABLE ledger_entries ALTER COLUMN entry_type SET NOT NULL;
 DROP INDEX IF EXISTS wager_successful_reversal_unique;
 DROP INDEX IF EXISTS wager_provider_idempotency_unique;
+ALTER TABLE wager_transactions
+    DROP CONSTRAINT IF EXISTS wager_reference_transaction_fk;
+ALTER TABLE wager_transactions
+    ALTER COLUMN reference_transaction_id TYPE TEXT
+        USING reference_transaction_id::text;
 ALTER TABLE wager_transactions DROP CONSTRAINT IF EXISTS wager_source_fields_check;
 ALTER TABLE wager_transactions DROP CONSTRAINT IF EXISTS wager_status_check;
 ALTER TABLE wager_transactions DROP CONSTRAINT IF EXISTS wager_kind_check;
