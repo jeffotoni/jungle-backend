@@ -1,0 +1,58 @@
+# Go
+
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+bin/
+build/
+dist/
+tmp/
+
+# Logs
+
+*.log
+logs/
+
+# Environment
+
+.env
+.env.*
+!.env.example
+
+# Test artifacts
+
+test-results/
+reports/
+*.prof
+*.pprof
+
+# Editors / IDEs
+
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+
+.DS_Store
+
+# Windows
+
+Thumbs.db
+
+# Temporary files
+
+*.tmp
+*.bak
+*.old
+*.orig
+*.cache
+.cache/
+

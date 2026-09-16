@@ -1,0 +1,41 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: jungle
+      POSTGRES_USER: jungle
+      POSTGRES_PASSWORD: jungle
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jungle -d jungle"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3
+    command: ["start-dev"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  localstack:
+    image: localstack/localstack:4
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - "./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro"
+
+volumes:
+  postgres_data:
