@@ -5,7 +5,7 @@ ALTER TABLE wallets
     ADD CONSTRAINT wallets_version_positive CHECK (version >= 1);
 
 ALTER TABLE wallets
-    ADD CONSTRAINT wallets_currency_iso_check CHECK (currency ~ '^[A-Z]{3}$');
+    ADD CONSTRAINT wallets_currency_format_check CHECK (currency ~ '^[A-Z]{3}$');
 
 CREATE UNIQUE INDEX IF NOT EXISTS wallets_player_currency_unique
     ON wallets (player_id, currency);

@@ -27,5 +27,5 @@ ALTER TABLE wager_transactions ALTER COLUMN external_transaction_id SET NOT NULL
 ALTER TABLE wager_transactions ALTER COLUMN provider_id SET NOT NULL;
 DROP INDEX IF EXISTS wallets_player_currency_unique;
 ALTER TABLE wallets DROP CONSTRAINT IF EXISTS wallets_version_positive;
-ALTER TABLE wallets DROP CONSTRAINT IF EXISTS wallets_currency_iso_check;
+ALTER TABLE wallets DROP CONSTRAINT IF EXISTS wallets_currency_format_check;
 ALTER TABLE wallets DROP COLUMN IF EXISTS version;
