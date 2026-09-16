@@ -19,9 +19,11 @@ const (
 type Status string
 
 const (
+	StatusPending          Status = "PENDING"
 	StatusPendingReference Status = "PENDING_REFERENCE"
 	StatusProcessed        Status = "PROCESSED"
 	StatusRejected         Status = "REJECTED"
+	StatusFailed           Status = "FAILED"
 )
 
 type Transaction struct {

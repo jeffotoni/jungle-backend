@@ -1,0 +1,73 @@
+{
+  "realm": "jungle",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "wallet-internal"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "jungle-api",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true
+    },
+    {
+      "clientId": "wallet-internal",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "INTERNAL_CLIENT_SECRET",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "jungle-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "jungle-api",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "provider-a",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "PROVIDER_CLIENT_SECRET",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "jungle-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "jungle-api",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-wallet-internal",
+      "enabled": true,
+      "serviceAccountClientId": "wallet-internal",
+      "realmRoles": [
+        "wallet-internal"
+      ]
+    }
+  ]
+}

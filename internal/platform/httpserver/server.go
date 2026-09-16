@@ -2,44 +2,55 @@ package httpserver
 
 import (
 	"context"
-	"errors"
-	"net/http"
+	"fmt"
 
+	jlog "github.com/jeffotoni/log"
 	"github.com/jeffotoni/quick"
 	"go.uber.org/fx"
-
-	"github.com/jeffotoni/jungle-backend-challenge/internal/config"
 )
 
 func NewRouter() *quick.Quick {
-	app := quick.New()
-
-	app.Get("/health", func(c *quick.Ctx) error {
-		return c.Status(quick.StatusOK).SendString("ok")
-	})
-
-	return app
+	return quick.New()
 }
 
-func NewServer(lc fx.Lifecycle, cfg config.Config, router *quick.Quick) *http.Server {
-	srv := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: router.Handler(),
+type Server struct {
+	router   *quick.Quick
+	address  string
+	logger   *jlog.Logger
+	shutdown func()
+}
+
+type TraceKey string
+
+func NewServer(lc fx.Lifecycle, address string, router *quick.Quick, logger *jlog.Logger, traceKey TraceKey) *Server {
+	srv := &Server{
+		router:  router,
+		address: address,
+		logger:  logger,
 	}
 
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
-			go func() {
-				err := srv.ListenAndServe()
-				if err != nil && !errors.Is(err, http.ErrServerClosed) {
-					// lifecycle cannot surface async ListenAndServe errors;
-					// structured logging/health monitoring will be wired in next phase.
-				}
-			}()
+			handler := HTTPMiddleware(srv.logger, string(traceKey))(srv.router.Handler())
+			_, shutdown, err := srv.router.ListenWithShutdown(srv.address, handler)
+			if err != nil {
+				return fmt.Errorf("start HTTP server: %w", err)
+			}
+			srv.shutdown = shutdown
+			_ = srv.logger.Info().
+				Str("address", srv.address).
+				Msg("api started").
+				Send()
 			return nil
 		},
 		OnStop: func(ctx context.Context) error {
-			return srv.Shutdown(ctx)
+			if srv.shutdown == nil {
+				return nil
+			}
+			srv.shutdown()
+			srv.shutdown = nil
+			_ = srv.logger.Info().Msg("api stopped").Send()
+			return nil
 		},
 	})
 

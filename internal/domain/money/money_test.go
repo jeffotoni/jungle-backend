@@ -4,7 +4,7 @@ import "testing"
 
 func TestParse(t *testing.T) {
 	tests := []struct {
-		in string
+		in   string
 		want int64
 	}{
 		{"25.00", 2500},
@@ -26,6 +26,28 @@ func TestParse(t *testing.T) {
 
 func TestParseRejectsInvalid(t *testing.T) {
 	for _, in := range []string{"", "1.001", "1e3", "NaN", "Infinity", "x.00"} {
+		if _, err := Parse(in, "BRL"); err == nil {
+			t.Fatalf("expected error for %q", in)
+		}
+	}
+}
+
+func TestParseRejectsNonISO4217Currency(t *testing.T) {
+	if _, err := Parse("10.00", "ZZZ"); err == nil {
+		t.Fatal("expected error for non-ISO 4217 currency")
+	}
+}
+
+func TestParseRejectsExternalNegativeAndInvalidScale(t *testing.T) {
+	for _, in := range []string{"-1.00", "+1.00", "1.001", "1.000"} {
+		if _, err := Parse(in, "BRL"); err == nil {
+			t.Fatalf("expected error for %q", in)
+		}
+	}
+}
+
+func TestParseRejectsScientificNotation(t *testing.T) {
+	for _, in := range []string{"1e3", "1E3", "2.5e1"} {
 		if _, err := Parse(in, "BRL"); err == nil {
 			t.Fatalf("expected error for %q", in)
 		}

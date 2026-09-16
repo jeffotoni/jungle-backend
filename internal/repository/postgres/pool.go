@@ -6,12 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/fx"
-
-	"github.com/jeffotoni/jungle-backend-challenge/internal/config"
 )
 
-func NewPool(lc fx.Lifecycle, cfg config.Config) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+func NewPool(lc fx.Lifecycle, databaseURL string) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(context.Background(), databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("postgres pool: %w", err)
 	}
