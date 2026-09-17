@@ -170,16 +170,11 @@ func (s *Service) persistPermanentFailureInTx(
 }
 
 func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, ports.WagerRecord, error) {
-	request.ProviderID = strings.TrimSpace(request.ProviderID)
-	request.ExternalTransactionID = strings.TrimSpace(request.ExternalTransactionID)
-	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
-	request.WalletID = strings.TrimSpace(request.WalletID)
-	request.PlayerID = strings.TrimSpace(request.PlayerID)
-	request.RoundID = strings.TrimSpace(request.RoundID)
-	request.GameID = strings.TrimSpace(request.GameID)
-	request.Kind = strings.ToUpper(strings.TrimSpace(request.Kind))
-	request.Money.Amount = strings.TrimSpace(request.Money.Amount)
-	request.Money.Currency = strings.ToUpper(strings.TrimSpace(request.Money.Currency))
+	normalized, err := contracts.NormalizeWagerRequest(request)
+	if err != nil {
+		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
+	}
+	request = normalized
 	if request.ProviderID == "" ||
 		request.ExternalTransactionID == "" ||
 		request.IdempotencyKey == "" ||
@@ -209,13 +204,12 @@ func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, por
 	}
 	if (kind == wager.KindRefund || kind == wager.KindRollback) &&
 		(request.ReferenceExternalTransactionID == nil ||
-			strings.TrimSpace(*request.ReferenceExternalTransactionID) == "") {
+			*request.ReferenceExternalTransactionID == "") {
 		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 	}
 	if request.ReferenceExternalTransactionID != nil {
-		value := strings.TrimSpace(*request.ReferenceExternalTransactionID)
-		request.ReferenceExternalTransactionID = &value
-		if value == "" || (kind != wager.KindWin && kind != wager.KindRefund && kind != wager.KindRollback) {
+		if *request.ReferenceExternalTransactionID == "" ||
+			(kind != wager.KindWin && kind != wager.KindRefund && kind != wager.KindRollback) {
 			return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 		}
 	}

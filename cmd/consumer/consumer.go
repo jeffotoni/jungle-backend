@@ -208,7 +208,12 @@ func (c *Consumer) handleMessage(ctx context.Context, message *sqs.Message) (mes
 		envelope.OccurredAt.IsZero() {
 		return messageResult{MessageID: envelope.MessageID}, fmt.Errorf("%w: incomplete envelope", errPermanentMessage)
 	}
-	hash, err := contracts.CanonicalHash(envelope.Data)
+	normalized, err := contracts.NormalizeWagerRequest(envelope.Data)
+	if err != nil {
+		return messageResult{MessageID: envelope.MessageID}, fmt.Errorf("%w: invalid wager data: %v", errPermanentMessage, err)
+	}
+	envelope.Data = normalized
+	hash, err := contracts.CanonicalHash(normalized)
 	if err != nil {
 		return messageResult{MessageID: envelope.MessageID}, fmt.Errorf("%w: payload hash: %v", errPermanentMessage, err)
 	}
