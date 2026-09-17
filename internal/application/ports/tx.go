@@ -101,7 +101,7 @@ type WagerStore interface {
 	InsertWager(context.Context, pgx.Tx, WagerRecord) (bool, error)
 	UpdateWager(context.Context, pgx.Tx, WagerRecord) error
 	InsertLedger(context.Context, pgx.Tx, LedgerRecord) error
-	InsertOutbox(context.Context, pgx.Tx, string, string, string, []byte) error
+	InsertOutbox(context.Context, pgx.Tx, string, string, string, string, []byte) error
 }
 
 type PendingReferenceStore interface {

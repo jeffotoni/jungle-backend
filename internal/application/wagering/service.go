@@ -752,11 +752,12 @@ func (s *Service) outbox(
 	eventType contracts.EventType,
 	data any,
 ) error {
-	payload, err := contracts.MarshalEvent(eventType, transaction.WalletID(), transaction.ID(), 1, data)
+	eventID := contracts.NewEventID()
+	payload, err := contracts.MarshalEvent(eventID, eventType, transaction.WalletID(), transaction.ID(), 1, data)
 	if err != nil {
 		return err
 	}
-	return s.wagers.InsertOutbox(ctx, tx, "wallet", transaction.WalletID(), string(eventType), payload)
+	return s.wagers.InsertOutbox(ctx, tx, eventID, "wallet", transaction.WalletID(), string(eventType), payload)
 }
 
 func failureCode(err error) string {

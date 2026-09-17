@@ -60,9 +60,13 @@ type WalletBalanceChangedData struct {
 	WalletVersion int64      `json:"walletVersion"`
 }
 
-func MarshalEvent[T any](eventType EventType, aggregateID, correlationID string, version int64, data T) ([]byte, error) {
+func NewEventID() string {
+	return uuid.NewString()
+}
+
+func MarshalEvent[T any](eventID string, eventType EventType, aggregateID, correlationID string, version int64, data T) ([]byte, error) {
 	return json.Marshal(EventEnvelope[T]{
-		EventID:       newEventID(),
+		EventID:       eventID,
 		EventType:     eventType,
 		AggregateID:   aggregateID,
 		CorrelationID: correlationID,
@@ -70,8 +74,4 @@ func MarshalEvent[T any](eventType EventType, aggregateID, correlationID string,
 		Version:       version,
 		Data:          data,
 	})
-}
-
-func newEventID() string {
-	return uuid.NewString()
 }

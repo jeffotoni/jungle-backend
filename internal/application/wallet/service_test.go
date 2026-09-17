@@ -91,7 +91,7 @@ func (s *walletWagerStoreFake) InsertLedger(_ context.Context, _ pgx.Tx, record 
 	return nil
 }
 
-func (s *walletWagerStoreFake) InsertOutbox(_ context.Context, _ pgx.Tx, _, _, eventType string, _ []byte) error {
+func (s *walletWagerStoreFake) InsertOutbox(_ context.Context, _ pgx.Tx, _, _, _, eventType string, _ []byte) error {
 	s.outbox = append(s.outbox, eventType)
 	return nil
 }

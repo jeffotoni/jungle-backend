@@ -120,14 +120,17 @@ func (s *Service) Create(ctx context.Context, playerID string, balance money.Mon
 		}); err != nil {
 			return err
 		}
-		processed, err := openingEvent(result, opening.ID())
+		processedEventID := contracts.NewEventID()
+		processed, err := openingEvent(processedEventID, result, opening.ID())
 		if err != nil {
 			return err
 		}
-		if err := s.wagers.InsertOutbox(ctx, tx, "wallet", id, "WagerTransactionProcessed", processed); err != nil {
+		if err := s.wagers.InsertOutbox(ctx, tx, processedEventID, "wallet", id, "WagerTransactionProcessed", processed); err != nil {
 			return err
 		}
+		changedEventID := contracts.NewEventID()
 		changed, err := balanceChangedEvent(
+			changedEventID,
 			result,
 			opening.ID(),
 			string(ledger.DirectionCredit),
@@ -138,7 +141,7 @@ func (s *Service) Create(ctx context.Context, playerID string, balance money.Mon
 		if err != nil {
 			return err
 		}
-		return s.wagers.InsertOutbox(ctx, tx, "wallet", id, "WalletBalanceChanged", changed)
+		return s.wagers.InsertOutbox(ctx, tx, changedEventID, "wallet", id, "WalletBalanceChanged", changed)
 	})
 	if err != nil {
 		if err == application.ErrConflict {
@@ -239,8 +242,9 @@ func isNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
 
-func openingEvent(wallet WalletResult, transactionID string) ([]byte, error) {
+func openingEvent(eventID string, wallet WalletResult, transactionID string) ([]byte, error) {
 	return contracts.MarshalEvent(
+		eventID,
 		contracts.EventWagerTransactionProcessed,
 		wallet.ID,
 		transactionID,
@@ -256,11 +260,13 @@ func openingEvent(wallet WalletResult, transactionID string) ([]byte, error) {
 }
 
 func balanceChangedEvent(
+	eventID string,
 	wallet WalletResult,
 	transactionID, direction string,
 	movement, before, after money.Money,
 ) ([]byte, error) {
 	return contracts.MarshalEvent(
+		eventID,
 		contracts.EventWalletBalanceChanged,
 		wallet.ID,
 		transactionID,

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
@@ -22,17 +21,28 @@ func (s *Store) InsertLedger(ctx context.Context, tx pgx.Tx, record ports.Ledger
 	return err
 }
 
-func (s *Store) InsertOutbox(ctx context.Context, tx pgx.Tx, aggregateType, aggregateID, eventType string, payload []byte) error {
+func (s *Store) InsertOutbox(ctx context.Context, tx pgx.Tx, eventID, aggregateType, aggregateID, eventType string, payload []byte) error {
 	if !json.Valid(payload) {
 		return errors.New("invalid outbox payload")
 	}
-	_, err := tx.Exec(ctx, `
+	var envelope struct {
+		EventID   string `json:"eventId"`
+		EventType string `json:"eventType"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return errors.New("invalid outbox envelope")
+	}
+	eventUUID, err := parseUUID(eventID)
+	if err != nil || envelope.EventID != eventID || envelope.EventType != eventType {
+		return errors.New("outbox event identity mismatch")
+	}
+	_, err = tx.Exec(ctx, `
 		INSERT INTO outbox_events (
 			id, aggregate_type, aggregate_id, event_type, payload, status,
 			attempts, next_attempt_at, created_at
 		)
 		VALUES ($1, $2, $3, $4, $5::jsonb, 'PENDING', 0, now(), now())`,
-		uuid.New(), aggregateType, aggregateID, eventType, payload)
+		eventUUID, aggregateType, aggregateID, eventType, payload)
 	return err
 }
 

@@ -3,10 +3,14 @@ package contracts
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestMarshalWalletBalanceChangedEvent(t *testing.T) {
+	eventID := uuid.NewString()
 	payload, err := MarshalEvent(
+		eventID,
 		EventWalletBalanceChanged,
 		"wallet-1",
 		"transaction-1",
@@ -29,7 +33,7 @@ func TestMarshalWalletBalanceChangedEvent(t *testing.T) {
 	if err := json.Unmarshal(payload, &event); err != nil {
 		t.Fatal(err)
 	}
-	if event.EventID == "" || event.EventType != EventWalletBalanceChanged {
+	if event.EventID != eventID || event.EventType != EventWalletBalanceChanged {
 		t.Fatalf("unexpected event identity: %+v", event)
 	}
 	if event.AggregateID != "wallet-1" || event.CorrelationID != "transaction-1" || event.Version != 2 {
