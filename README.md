@@ -283,11 +283,35 @@ docker compose down -v --remove-orphans
 
 ### 2. Start PostgreSQL and initialize the database
 
-The six migration `up` files are mounted into PostgreSQL's initialization directory. They run automatically when the `postgres_data` volume is created.
+The migrations run automatically inside the PostgreSQL container. There is no separate migration service or manual migration command in the first-time setup.
+
+The six migration `up` files are mounted by Docker Compose into PostgreSQL's initialization directory. The official PostgreSQL image executes them in filename order while creating the `postgres_data` volume:
+
+```text
+docker compose
+      |
+      v
+postgres container
+      |
+      v
+/docker-entrypoint-initdb.d/
+      |
+      +--> 001_init.sql
+      +--> 002_api_financial_guarantees.sql
+      +--> 003_inbox_consumer_identity.sql
+      +--> 004_outbox_claim_lease.sql
+      +--> 005_pending_reference_retry.sql
+      +--> 006_financial_constraints.sql
+      |
+      v
+Complete PostgreSQL schema
+```
 
 ```bash
 docker compose up -d postgres
 ```
+
+Therefore, the command above both starts PostgreSQL and initializes the complete database schema when the volume is new.
 
 Wait until PostgreSQL is healthy:
 
@@ -318,7 +342,14 @@ The expected tables are:
 - `inbox_messages`
 - `outbox_events`
 
-If the PostgreSQL volume already exists, initialization scripts are not executed again. Use the reset procedure above when a completely clean database is required.
+If the PostgreSQL volume already exists, initialization scripts are not executed again. To run all migrations again, remove the local volume and recreate PostgreSQL:
+
+```bash
+docker compose down -v --remove-orphans
+docker compose up -d postgres
+```
+
+The `down -v` command permanently removes all local PostgreSQL data. Use it only when a complete reset is intended.
 
 ### 3. Start Keycloak and LocalStack
 
