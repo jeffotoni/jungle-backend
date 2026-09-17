@@ -140,6 +140,14 @@ The embedded Swagger service serves the API documentation independently from the
 - Serves the OpenAPI specification from [`cmd/swagger/api.yaml`](cmd/swagger/api.yaml).
 - Runs as a separate Compose service and container.
 
+## Load and performance testing
+
+The k6 suite is dedicated to HTTP load and performance validation for the API. It exercises the wagering flow through the POST endpoint and the related transaction GET endpoints using smoke, load and stress profiles.
+
+These scenarios complement the Go integration tests: k6 measures runtime behavior under traffic, while the integration tests validate persistence, messaging, idempotency and concurrency correctness.
+
+Documentation: [`k6/README.md`](k6/README.md)
+
 ## Shared application flow
 
 API and Consumer use the same Application/Domain path. The transport is different, but the financial behavior is shared:
