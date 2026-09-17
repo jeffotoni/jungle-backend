@@ -257,12 +257,58 @@ func replayOrConflict(record ports.WagerRecord, hash string) (Result, error) {
 	return result, nil
 }
 
+func (s *Service) ResumePendingReference(
+	ctx context.Context,
+	tx pgx.Tx,
+	record ports.WagerRecord,
+) (Result, error) {
+	if record.Status != wager.StatusPendingReference {
+		return Result{}, application.ErrInvalid
+	}
+	amount, err := money.New(record.Amount, record.Currency)
+	if err != nil {
+		return Result{}, err
+	}
+	var result Result
+	err = s.applyWithPendingEvent(ctx, tx, record, amount, &result, false)
+	return result, err
+}
+
+func (s *Service) RejectPendingReference(
+	ctx context.Context,
+	tx pgx.Tx,
+	record ports.WagerRecord,
+	code string,
+) (Result, error) {
+	wallet, err := s.wallets.LockWallet(ctx, tx, record.WalletID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Result{}, application.ErrNotFound
+		}
+		return Result{}, err
+	}
+	var result Result
+	err = s.reject(ctx, tx, record, wallet.Balance, wallet.Currency, code, &result)
+	return result, err
+}
+
 func (s *Service) apply(
 	ctx context.Context,
 	tx pgx.Tx,
 	record ports.WagerRecord,
 	amount money.Money,
 	result *Result,
+) error {
+	return s.applyWithPendingEvent(ctx, tx, record, amount, result, true)
+}
+
+func (s *Service) applyWithPendingEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	record ports.WagerRecord,
+	amount money.Money,
+	result *Result,
+	emitPendingEvent bool,
 ) error {
 	wallet, err := s.wallets.LockWallet(ctx, tx, record.WalletID)
 	if err != nil {
@@ -286,6 +332,9 @@ func (s *Service) apply(
 				result.TransactionID, result.Status = record.ID, wager.StatusPendingReference
 				if err := s.update(ctx, tx, record, wager.StatusPendingReference, &current, "REFERENCE_PENDING"); err != nil {
 					return err
+				}
+				if !emitPendingEvent {
+					return nil
 				}
 				return s.outbox(
 					ctx,

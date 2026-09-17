@@ -43,6 +43,9 @@ type WagerRecord struct {
 	PayloadHash                    string
 	ResultBalance                  *int64
 	FailureCode                    *string
+	ReferenceAttempts              int
+	ReferenceNextAttemptAt         *time.Time
+	ReferencePendingAt             *time.Time
 	CreatedAt                      time.Time
 	UpdatedAt                      time.Time
 }
@@ -99,6 +102,11 @@ type WagerStore interface {
 	UpdateWager(context.Context, pgx.Tx, WagerRecord) error
 	InsertLedger(context.Context, pgx.Tx, LedgerRecord) error
 	InsertOutbox(context.Context, pgx.Tx, string, string, string, []byte) error
+}
+
+type PendingReferenceStore interface {
+	ClaimPendingReferences(context.Context, pgx.Tx, int) ([]WagerRecord, error)
+	UpdatePendingReferenceRetry(context.Context, pgx.Tx, string, int, time.Time) error
 }
 
 type InboxStore interface {

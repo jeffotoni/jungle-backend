@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,7 +16,8 @@ const wagerSelect = `
 	       wallet_id, player_id, round_id, game_id, kind, amount, currency,
 	       reference_external_transaction_id, reference_transaction_id,
 	       status, payload_hash,
-	       result_balance, failure_code, created_at, updated_at
+	       result_balance, failure_code, reference_attempts,
+	       reference_next_attempt_at, reference_pending_at, created_at, updated_at
 	FROM wager_transactions`
 
 func (s *Store) FindByID(ctx context.Context, tx pgx.Tx, providerID, id string) (ports.WagerRecord, error) {
@@ -36,6 +38,51 @@ func (s *Store) FindReference(ctx context.Context, tx pgx.Tx, providerID, extern
 
 func (s *Store) FindReferenceForUpdate(ctx context.Context, tx pgx.Tx, providerID, externalID string) (ports.WagerRecord, error) {
 	return s.scanWager(tx.QueryRow(ctx, wagerSelect+` WHERE provider_id = $1 AND external_transaction_id = $2 FOR UPDATE`, providerID, externalID))
+}
+
+func (s *Store) ClaimPendingReferences(ctx context.Context, tx pgx.Tx, limit int) ([]ports.WagerRecord, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := tx.Query(ctx, wagerSelect+` WHERE status = 'PENDING_REFERENCE'
+		AND (reference_next_attempt_at IS NULL OR reference_next_attempt_at <= now())
+		ORDER BY COALESCE(reference_next_attempt_at, reference_pending_at, created_at), id
+		LIMIT $1 FOR UPDATE SKIP LOCKED`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	records := make([]ports.WagerRecord, 0, limit)
+	for rows.Next() {
+		record, err := s.scanWager(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, rows.Err()
+}
+
+func (s *Store) UpdatePendingReferenceRetry(
+	ctx context.Context,
+	tx pgx.Tx,
+	id string,
+	attempts int,
+	nextAttemptAt time.Time,
+) error {
+	result, err := tx.Exec(ctx, `
+		UPDATE wager_transactions
+		SET reference_attempts = $2, reference_next_attempt_at = $3, updated_at = now()
+		WHERE id = $1 AND status = 'PENDING_REFERENCE'`,
+		mustUUID(id), attempts, nextAttemptAt)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 func (s *Store) HasSuccessfulReversal(ctx context.Context, tx pgx.Tx, providerID string, kind wager.Kind, reference string) (bool, error) {
@@ -97,13 +144,26 @@ func (s *Store) UpdateWager(ctx context.Context, tx pgx.Tx, record ports.WagerRe
 	_, err = tx.Exec(ctx, `
 		UPDATE wager_transactions
 		SET reference_transaction_id = $2, status = $3, result_balance = $4,
-		    failure_code = $5, updated_at = now()
+		    failure_code = $5,
+		    reference_pending_at = CASE
+			    WHEN $3 = 'PENDING_REFERENCE' THEN COALESCE(reference_pending_at, now())
+			    ELSE reference_pending_at
+		    END,
+		    reference_next_attempt_at = CASE
+			    WHEN $3 = 'PENDING_REFERENCE' THEN COALESCE(reference_next_attempt_at, now())
+			    ELSE NULL
+		    END,
+		    updated_at = now()
 		WHERE id = $1`, mustUUID(record.ID), referenceID, string(record.Status),
 		record.ResultBalance, record.FailureCode)
 	return err
 }
 
-func (s *Store) scanWager(row pgx.Row) (ports.WagerRecord, error) {
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func (s *Store) scanWager(row rowScanner) (ports.WagerRecord, error) {
 	var record ports.WagerRecord
 	var id, wallet uuid.UUID
 	var providerID, externalID, key, referenceExternalID, failureCode *string
@@ -112,7 +172,9 @@ func (s *Store) scanWager(row pgx.Row) (ports.WagerRecord, error) {
 	if err := row.Scan(&id, &providerID, &externalID, &key, &wallet, &record.PlayerID,
 		&record.RoundID, &record.GameID, &kind, &record.Amount, &record.Currency,
 		&referenceExternalID, &referenceID, &status, &record.PayloadHash,
-		&record.ResultBalance, &failureCode, &record.CreatedAt, &record.UpdatedAt); err != nil {
+		&record.ResultBalance, &failureCode, &record.ReferenceAttempts,
+		&record.ReferenceNextAttemptAt, &record.ReferencePendingAt,
+		&record.CreatedAt, &record.UpdatedAt); err != nil {
 		return ports.WagerRecord{}, err
 	}
 	record.ID = id.String()

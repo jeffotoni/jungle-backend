@@ -2,9 +2,9 @@
 
 Distributed Go backend for wallet and wagering operations.
 
-The project is divided into three independent services. Each service has its own process and responsibility. Shared Application, Domain, contracts, ports and PostgreSQL adapters are kept under `internal/`.
+The project is divided into three primary independent services and one dedicated reference worker. Each process has its own responsibility. Shared Application, Domain, contracts, ports and PostgreSQL adapters are kept under `internal/`.
 
-## Three services
+## Primary services and reference worker
 
 ```text
         HTTP Client
@@ -59,6 +59,22 @@ API --------\
 Consumer ---/
 ```
 
+Pending-reference continuation:
+
+```text
+wager_transactions
+status = PENDING_REFERENCE
+        |
+        v
+cmd/reference-worker
+        |
+        v
+SAME Application / Domain -> PostgreSQL
+        |
+        +--> resolved: REFUND/ROLLBACK and outbox events
+        +--> expired: REJECTED and WagerTransactionRejected
+```
+
 ## Service responsibilities
 
 ### `cmd/api`
@@ -101,6 +117,20 @@ The transactional outbox worker.
 - Does not expose HTTP endpoints.
 
 Documentation: [`cmd/publisher/README.md`](cmd/publisher/README.md)
+
+### `cmd/reference-worker`
+
+The pending-reference continuation worker.
+
+- Finds eligible `PENDING_REFERENCE` transactions in PostgreSQL.
+- Resolves references for `REFUND` and `ROLLBACK`.
+- Uses the same Application/Domain use cases as the API and Consumer.
+- Applies persistent retry, exponential backoff, TTL and maximum attempts.
+- Finalizes expired references as `REJECTED` with `REFERENCE_NOT_FOUND`.
+- Writes resulting events to the transactional outbox.
+- Does not consume or publish SQS messages directly.
+
+Documentation: [`cmd/reference-worker/README.md`](cmd/reference-worker/README.md)
 
 ## Shared application flow
 
@@ -199,4 +229,4 @@ internal/
 └── repository/        Shared PostgreSQL persistence
 ```
 
-The three services remain independently deployable while using the shared components required for consistent financial behavior.
+The primary services and reference worker remain independently deployable while using the shared components required for consistent financial behavior.
