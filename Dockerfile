@@ -8,6 +8,7 @@ RUN go mod download
 COPY . .
 
 ARG SERVICE
+
 RUN test -n "$SERVICE" && \
     CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
@@ -16,13 +17,15 @@ RUN test -n "$SERVICE" && \
     ./cmd/$SERVICE
 
 
-FROM alpine:3.22
+FROM scratch
 
-RUN apk add --no-cache ca-certificates
+ENV TZ=America/Sao_Paulo
 
-ENV TZ=UTC
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt \
+    /etc/ssl/certs/ca-certificates.crt
 
-WORKDIR /app
+COPY --from=builder /usr/share/zoneinfo \
+    /usr/share/zoneinfo
 
 COPY --from=builder /out/service /app/service
 
