@@ -33,9 +33,10 @@ var API = fx.Module(
 				TraceIDKey:  apiconfig.TRACE_ID,
 			})
 		},
-		func() string {
-			return apiconfig.HTTP_ADDR
-		},
+		fx.Annotate(
+			func() string { return apiconfig.HTTP_ADDR },
+			fx.ResultTags(`name:"httpAddress"`),
+		),
 		func() httpserver.TraceKey {
 			return httpserver.TraceKey(apiconfig.TRACE_ID)
 		},
@@ -43,7 +44,10 @@ var API = fx.Module(
 			level := strings.ToUpper(strings.TrimSpace(apiconfig.LOG_LEVEL))
 			return level == string(log.DEBUG) || level == string(log.TRACE)
 		},
-		func() string { return apiconfig.SQS_WAGER_QUEUE_URL },
+		fx.Annotate(
+			func() string { return apiconfig.SQS_WAGER_QUEUE_URL },
+			fx.ResultTags(`name:"sqsQueueURL"`),
+		),
 		func() time.Duration { return apiconfig.SQS_HEALTH_TIMEOUT },
 		func() handlers.SQSHealthClient {
 			client, err := newAPIHealthSQSClient()
@@ -62,8 +66,14 @@ var API = fx.Module(
 		},
 		appwallet.NewService,
 		appwager.NewService,
-		handlers.NewRouter,
-		httpserver.NewServer,
+		fx.Annotate(
+			handlers.NewRouter,
+			fx.ParamTags("", "", "", "", "", `name:"sqsQueueURL"`, ""),
+		),
+		fx.Annotate(
+			httpserver.NewServer,
+			fx.ParamTags("", `name:"httpAddress"`, "", "", "", ""),
+		),
 	),
 	fx.Invoke(func(*httpserver.Server) {}),
 )
