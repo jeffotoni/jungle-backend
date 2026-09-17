@@ -11,7 +11,9 @@ import (
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/contracts"
+	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/ledger"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
 	domainwallet "github.com/jeffotoni/jungle-backend-challenge/internal/domain/wallet"
 )
 
@@ -47,7 +49,7 @@ func NewService(tx ports.TxManager, wallets ports.WalletStore, wagers ports.Wage
 }
 
 func (s *Service) Create(ctx context.Context, playerID string, balance money.Money) (WalletResult, error) {
-	if playerID == "" || balance.Amount < 0 {
+	if playerID == "" || balance.MinorUnits() < 0 {
 		return WalletResult{}, application.ErrInvalid
 	}
 	id := uuid.NewString()
@@ -57,58 +59,68 @@ func (s *Service) Create(ctx context.Context, playerID string, balance money.Mon
 	}
 	now := time.Now().UTC()
 	result := WalletResult{
-		ID:        id,
-		PlayerID:  playerID,
-		Balance:   aggregate.Balance,
-		Version:   aggregate.Version,
+		ID:        aggregate.ID(),
+		PlayerID:  aggregate.PlayerID(),
+		Balance:   aggregate.Balance(),
+		Version:   aggregate.Version(),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 	err = s.tx.WithinTx(ctx, func(tx pgx.Tx) error {
 		if err := s.wallets.CreateWallet(ctx, tx, ports.WalletRecord{
-			ID:       id,
+			ID:       aggregate.ID(),
 			PlayerID: playerID,
-			Balance:  balance.Amount,
-			Currency: balance.Currency,
-			Version:  1,
+			Balance:  aggregate.Balance().MinorUnits(),
+			Currency: aggregate.Balance().Currency(),
+			Version:  aggregate.Version(),
 		}); err != nil {
 			if errors.Is(err, ports.ErrUniqueViolation) {
 				return application.ErrConflict
 			}
 			return err
 		}
-		if balance.Amount == 0 {
+		if balance.MinorUnits() == 0 {
 			return nil
 		}
 		openingID := uuid.NewString()
-		opening := ports.WagerRecord{
-			ID:          openingID,
-			WalletID:    id,
-			PlayerID:    playerID,
-			Kind:        "OPENING",
-			Amount:      balance.Amount,
-			Currency:    balance.Currency,
-			Status:      "PROCESSED",
-			PayloadHash: "internal",
+		opening, err := wager.NewOpening(openingID, aggregate.ID(), aggregate.PlayerID(), balance)
+		if err != nil {
+			return err
 		}
-		if inserted, err := s.wagers.InsertWager(ctx, tx, opening); err != nil {
+		if inserted, err := s.wagers.InsertWager(ctx, tx, wagerRecord(opening)); err != nil {
 			return err
 		} else if !inserted {
 			return application.ErrConflict
 		}
-		if err := s.wagers.InsertLedger(ctx, tx, ports.LedgerRecord{
+		zero, err := money.Zero(balance.Currency())
+		if err != nil {
+			return err
+		}
+		entry, err := ledger.New(ledger.EntryInput{
 			ID:            uuid.NewString(),
-			WalletID:      id,
-			TransactionID: openingID,
-			Direction:     "CREDIT",
-			Amount:        balance.Amount,
-			Currency:      balance.Currency,
-			BalanceBefore: 0,
-			BalanceAfter:  balance.Amount,
+			WalletID:      aggregate.ID(),
+			TransactionID: opening.ID(),
+			Direction:     ledger.DirectionCredit,
+			Amount:        balance,
+			BalanceBefore: zero,
+			BalanceAfter:  balance,
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.wagers.InsertLedger(ctx, tx, ports.LedgerRecord{
+			ID:            entry.ID(),
+			WalletID:      entry.WalletID(),
+			TransactionID: entry.TransactionID(),
+			Direction:     string(entry.Direction()),
+			Amount:        entry.Amount().MinorUnits(),
+			Currency:      entry.Amount().Currency(),
+			BalanceBefore: entry.BalanceBefore().MinorUnits(),
+			BalanceAfter:  entry.BalanceAfter().MinorUnits(),
 		}); err != nil {
 			return err
 		}
-		processed, err := openingEvent(result, openingID)
+		processed, err := openingEvent(result, opening.ID())
 		if err != nil {
 			return err
 		}
@@ -117,10 +129,10 @@ func (s *Service) Create(ctx context.Context, playerID string, balance money.Mon
 		}
 		changed, err := balanceChangedEvent(
 			result,
-			openingID,
-			"CREDIT",
+			opening.ID(),
+			string(ledger.DirectionCredit),
 			balance,
-			money.Money{Currency: balance.Currency},
+			zero,
 			balance,
 		)
 		if err != nil {
@@ -209,7 +221,7 @@ func (s *Service) Reconcile(ctx context.Context, id string) (Reconciliation, err
 			Wallet:         walletResultValue,
 			Calculated:     calculated,
 			Difference:     difference,
-			Consistent:     difference.Amount == 0,
+			Consistent:     difference.MinorUnits() == 0,
 			CheckedEntries: entries,
 		}
 		return nil
@@ -266,5 +278,32 @@ func balanceChangedEvent(
 }
 
 func moneyPayload(value money.Money) contracts.MoneyInput {
-	return contracts.MoneyInput{Amount: value.String(), Currency: value.Currency}
+	return contracts.MoneyInput{Amount: value.String(), Currency: value.Currency()}
+}
+
+func wagerRecord(transaction wager.Transaction) ports.WagerRecord {
+	var resultBalance *int64
+	if value := transaction.ResultBalance(); value != nil {
+		amount := value.MinorUnits()
+		resultBalance = &amount
+	}
+	return ports.WagerRecord{
+		ID:                             transaction.ID(),
+		ProviderID:                     transaction.ProviderID(),
+		ExternalTransactionID:          transaction.ExternalTransactionID(),
+		IdempotencyKey:                 transaction.IdempotencyKey(),
+		WalletID:                       transaction.WalletID(),
+		PlayerID:                       transaction.PlayerID(),
+		RoundID:                        transaction.RoundID(),
+		GameID:                         transaction.GameID(),
+		Kind:                           transaction.Kind(),
+		Amount:                         transaction.Money().MinorUnits(),
+		Currency:                       transaction.Money().Currency(),
+		ReferenceExternalTransactionID: transaction.ReferenceExternalTransactionID(),
+		ReferenceTransactionID:         transaction.ReferenceTransactionID(),
+		Status:                         transaction.Status(),
+		PayloadHash:                    transaction.PayloadHash(),
+		ResultBalance:                  resultBalance,
+		FailureCode:                    transaction.FailureCode(),
+	}
 }

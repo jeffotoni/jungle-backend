@@ -109,7 +109,7 @@ func TestCreateWalletCreatesOpeningAndCreditLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Version != 1 || result.Balance.Amount != 2500 {
+	if result.Version != 1 || result.Balance.MinorUnits() != 2500 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if len(wallets.created) != 1 {

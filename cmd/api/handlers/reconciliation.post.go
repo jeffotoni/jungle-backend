@@ -19,15 +19,15 @@ func (r *Routes) reconcile(c *quick.Ctx) error {
 		WalletID: result.Wallet.ID,
 		StoredBalance: models.Money{
 			Amount:   result.Wallet.Balance.String(),
-			Currency: result.Wallet.Balance.Currency,
+			Currency: result.Wallet.Balance.Currency(),
 		},
 		CalculatedBalance: models.Money{
 			Amount:   result.Calculated.String(),
-			Currency: result.Calculated.Currency,
+			Currency: result.Calculated.Currency(),
 		},
 		Difference: models.Money{
 			Amount:   result.Difference.String(),
-			Currency: result.Difference.Currency,
+			Currency: result.Difference.Currency(),
 		},
 		Consistent:     result.Consistent,
 		CheckedEntries: result.CheckedEntries,

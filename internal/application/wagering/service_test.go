@@ -182,7 +182,7 @@ func TestProcessBETWithSufficientBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.Amount != 1500 {
+	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.MinorUnits() != 1500 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if store.wallets[testWalletID].Balance != 1500 || store.wallets[testWalletID].Version != 2 {
@@ -223,7 +223,7 @@ func TestProcessIdempotencyReplayAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !replay.Replay || replay.TransactionID != first.TransactionID || replay.Balance == nil || replay.Balance.Amount != 1500 {
+	if !replay.Replay || replay.TransactionID != first.TransactionID || replay.Balance == nil || replay.Balance.MinorUnits() != 1500 {
 		t.Fatalf("unexpected replay: %+v", replay)
 	}
 	if len(store.wagers) != 1 || len(store.ledger) != 1 || store.wallets[testWalletID].Balance != 1500 {
@@ -265,7 +265,7 @@ func TestProcessLOSSDoesNotChangeBalanceOrCreateLedger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.Amount != 2500 {
+	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.MinorUnits() != 2500 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if store.wallets[testWalletID].Balance != 2500 || store.wallets[testWalletID].Version != 1 {
@@ -291,7 +291,7 @@ func TestProcessREFUNDValidatesBETReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.Amount != 2500 {
+	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.MinorUnits() != 2500 {
 		t.Fatalf("unexpected refund: %+v", result)
 	}
 	if len(store.ledger) != 2 || store.ledger[1].Direction != "CREDIT" {
@@ -314,7 +314,7 @@ func TestProcessROLLBACKValidatesWINReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.Amount != 2500 {
+	if result.Status != wager.StatusProcessed || result.Balance == nil || result.Balance.MinorUnits() != 2500 {
 		t.Fatalf("unexpected rollback: %+v", result)
 	}
 	if len(store.ledger) != 2 || store.ledger[1].Direction != "DEBIT" {

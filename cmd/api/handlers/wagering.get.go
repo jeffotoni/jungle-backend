@@ -44,7 +44,7 @@ func wagerResponseValue(result appwager.Result) models.WagerResponse {
 		FailureCode:      result.FailureCode,
 	}
 	if result.Balance != nil {
-		response.Balance = &models.Money{Amount: result.Balance.String(), Currency: result.Balance.Currency}
+		response.Balance = &models.Money{Amount: result.Balance.String(), Currency: result.Balance.Currency()}
 	}
 	return response
 }

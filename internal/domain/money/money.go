@@ -16,8 +16,8 @@ var (
 )
 
 type Money struct {
-	Amount   int64
-	Currency string
+	amount   int64
+	currency string
 }
 
 func New(amount int64, currency string) (Money, error) {
@@ -25,7 +25,23 @@ func New(amount int64, currency string) (Money, error) {
 	if !validCurrency(currency) {
 		return Money{}, ErrInvalidCurrency
 	}
-	return Money{Amount: amount, Currency: currency}, nil
+	return Money{amount: amount, currency: currency}, nil
+}
+
+func Rehydrate(amount int64, currency string) (Money, error) {
+	return New(amount, currency)
+}
+
+func Zero(currency string) (Money, error) {
+	return New(0, currency)
+}
+
+func (m Money) MinorUnits() int64 {
+	return m.amount
+}
+
+func (m Money) Currency() string {
+	return m.currency
 }
 
 func Parse(amount, currency string) (Money, error) {
@@ -99,7 +115,7 @@ func Parse(amount, currency string) (Money, error) {
 		return Money{}, ErrOverflow
 	}
 	value := wholeValue*100 + fractionValue
-	return Money{Amount: value, Currency: currency}, nil
+	return Money{amount: value, currency: currency}, nil
 }
 
 func validCurrency(currency string) bool {
@@ -125,7 +141,7 @@ var iso4217 = func() map[string]bool {
 
 func (m Money) String() string {
 	sign := ""
-	value := m.Amount
+	value := m.amount
 	if value < 0 {
 		sign = "-"
 		if value == math.MinInt64 {
@@ -137,22 +153,42 @@ func (m Money) String() string {
 }
 
 func (m Money) Add(other Money) (Money, error) {
-	if m.Currency != other.Currency {
+	if m.currency != other.currency {
 		return Money{}, ErrCurrencyMismatch
 	}
-	if (other.Amount > 0 && m.Amount > math.MaxInt64-other.Amount) ||
-		(other.Amount < 0 && m.Amount < math.MinInt64-other.Amount) {
+	if (other.amount > 0 && m.amount > math.MaxInt64-other.amount) ||
+		(other.amount < 0 && m.amount < math.MinInt64-other.amount) {
 		return Money{}, ErrOverflow
 	}
-	return Money{Amount: m.Amount + other.Amount, Currency: m.Currency}, nil
+	return Money{amount: m.amount + other.amount, currency: m.currency}, nil
 }
 
 func (m Money) Sub(other Money) (Money, error) {
-	if m.Currency != other.Currency {
+	if m.currency != other.currency {
 		return Money{}, ErrCurrencyMismatch
 	}
-	if other.Amount == math.MinInt64 {
+	if other.amount == math.MinInt64 {
 		return Money{}, ErrOverflow
 	}
-	return m.Add(Money{Amount: -other.Amount, Currency: other.Currency})
+	return m.Add(Money{amount: -other.amount, currency: other.currency})
+}
+
+func (m Money) Negate() (Money, error) {
+	if m.amount == math.MinInt64 {
+		return Money{}, ErrOverflow
+	}
+	return Money{amount: -m.amount, currency: m.currency}, nil
+}
+
+func (m Money) Compare(other Money) (int, error) {
+	if m.currency != other.currency {
+		return 0, ErrCurrencyMismatch
+	}
+	if m.amount < other.amount {
+		return -1, nil
+	}
+	if m.amount > other.amount {
+		return 1, nil
+	}
+	return 0, nil
 }

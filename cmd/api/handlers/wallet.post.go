@@ -18,7 +18,7 @@ func (r *Routes) createWallet(c *quick.Ctx) error {
 		return writeError(c, errInvalid())
 	}
 	balance, err := money.Parse(request.InitialBalance.Amount, request.InitialBalance.Currency)
-	if err != nil || balance.Amount < 0 {
+	if err != nil || balance.MinorUnits() < 0 {
 		return writeError(c, errInvalid())
 	}
 	result, err := r.wallets.Create(c.Ctx(), request.PlayerID, balance)
@@ -30,7 +30,7 @@ func (r *Routes) createWallet(c *quick.Ctx) error {
 		PlayerID: result.PlayerID,
 		Balance: models.Money{
 			Amount:   result.Balance.String(),
-			Currency: result.Balance.Currency,
+			Currency: result.Balance.Currency(),
 		},
 		Version: result.Version,
 	})

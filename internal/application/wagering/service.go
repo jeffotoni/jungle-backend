@@ -11,8 +11,10 @@ import (
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/contracts"
+	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/ledger"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
 	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
+	domainwallet "github.com/jeffotoni/jungle-backend-challenge/internal/domain/wallet"
 )
 
 type Service struct {
@@ -34,14 +36,14 @@ func NewService(tx ports.TxManager, wallets ports.WalletStore, wagers ports.Wage
 }
 
 func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (Result, error) {
-	request, base, amount, err := prepareRequest(request)
+	request, base, err := prepareRequest(request)
 	if err != nil {
 		return Result{}, err
 	}
 
 	var result Result
 	err = s.tx.WithinTx(ctx, func(tx pgx.Tx) error {
-		return s.processTx(ctx, tx, request, base, amount, &result)
+		return s.processTx(ctx, tx, request, base, &result)
 	})
 	if errors.Is(err, ports.ErrUniqueViolation) {
 		return Result{}, application.ErrConflict
@@ -54,19 +56,19 @@ func (s *Service) ProcessInTx(
 	tx pgx.Tx,
 	request contracts.WagerRequest,
 ) (Result, error) {
-	request, base, amount, err := prepareRequest(request)
+	request, base, err := prepareRequest(request)
 	if err != nil {
 		return Result{}, err
 	}
 	var result Result
-	err = s.processTx(ctx, tx, request, base, amount, &result)
+	err = s.processTx(ctx, tx, request, base, &result)
 	if errors.Is(err, ports.ErrUniqueViolation) {
 		return Result{}, application.ErrConflict
 	}
 	return result, err
 }
 
-func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, ports.WagerRecord, money.Money, error) {
+func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, ports.WagerRecord, error) {
 	request.ProviderID = strings.TrimSpace(request.ProviderID)
 	request.ExternalTransactionID = strings.TrimSpace(request.ExternalTransactionID)
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
@@ -84,10 +86,10 @@ func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, por
 		request.PlayerID == "" ||
 		request.RoundID == "" ||
 		request.GameID == "" {
-		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 	}
 	if _, err := uuid.Parse(request.WalletID); err != nil {
-		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 	}
 	kind := wager.Kind(request.Kind)
 	if kind != wager.KindBet &&
@@ -95,35 +97,53 @@ func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, por
 		kind != wager.KindLoss &&
 		kind != wager.KindRefund &&
 		kind != wager.KindRollback {
-		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 	}
 	amount, err := money.Parse(request.Money.Amount, request.Money.Currency)
 	if err != nil ||
-		amount.Amount < 0 ||
-		(kind == wager.KindLoss && amount.Amount != 0) ||
-		(kind != wager.KindLoss && amount.Amount == 0) {
-		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
+		amount.MinorUnits() < 0 ||
+		(kind == wager.KindLoss && amount.MinorUnits() != 0) ||
+		(kind != wager.KindLoss && amount.MinorUnits() == 0) {
+		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 	}
 	if (kind == wager.KindRefund || kind == wager.KindRollback) &&
 		(request.ReferenceExternalTransactionID == nil ||
 			strings.TrimSpace(*request.ReferenceExternalTransactionID) == "") {
-		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
+		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 	}
 	if request.ReferenceExternalTransactionID != nil {
 		value := strings.TrimSpace(*request.ReferenceExternalTransactionID)
 		request.ReferenceExternalTransactionID = &value
 		if value == "" || (kind != wager.KindWin && kind != wager.KindRefund && kind != wager.KindRollback) {
-			return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, application.ErrInvalid
+			return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
 		}
 	}
 	hash, err := contracts.CanonicalHash(request)
 	if err != nil {
-		return contracts.WagerRequest{}, ports.WagerRecord{}, money.Money{}, err
+		return contracts.WagerRequest{}, ports.WagerRecord{}, err
 	}
 	transactionID := uuid.NewString()
 	providerID := request.ProviderID
 	externalID := request.ExternalTransactionID
 	idempotencyKey := request.IdempotencyKey
+	transaction, err := wager.New(wager.Input{
+		ID:                             transactionID,
+		ProviderID:                     &providerID,
+		ExternalTransactionID:          &externalID,
+		IdempotencyKey:                 &idempotencyKey,
+		WalletID:                       request.WalletID,
+		PlayerID:                       request.PlayerID,
+		RoundID:                        request.RoundID,
+		GameID:                         request.GameID,
+		Kind:                           kind,
+		Money:                          amount,
+		ReferenceExternalTransactionID: request.ReferenceExternalTransactionID,
+		Status:                         wager.StatusPending,
+		PayloadHash:                    hash,
+	})
+	if err != nil {
+		return contracts.WagerRequest{}, ports.WagerRecord{}, application.ErrInvalid
+	}
 	base := ports.WagerRecord{
 		ID:                             transactionID,
 		ProviderID:                     &providerID,
@@ -134,13 +154,13 @@ func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, por
 		RoundID:                        request.RoundID,
 		GameID:                         request.GameID,
 		Kind:                           kind,
-		Amount:                         amount.Amount,
-		Currency:                       amount.Currency,
+		Amount:                         transaction.Money().MinorUnits(),
+		Currency:                       transaction.Money().Currency(),
 		ReferenceExternalTransactionID: request.ReferenceExternalTransactionID,
 		Status:                         wager.StatusPending,
 		PayloadHash:                    hash,
 	}
-	return request, base, amount, nil
+	return request, base, nil
 }
 
 func (s *Service) processTx(
@@ -148,7 +168,6 @@ func (s *Service) processTx(
 	tx pgx.Tx,
 	request contracts.WagerRequest,
 	base ports.WagerRecord,
-	amount money.Money,
 	result *Result,
 ) error {
 	providerID := request.ProviderID
@@ -200,7 +219,7 @@ func (s *Service) processTx(
 		}
 		return application.ErrConflict
 	}
-	return s.apply(ctx, tx, base, amount, result)
+	return s.apply(ctx, tx, base, result)
 }
 
 func (s *Service) Get(ctx context.Context, providerID, transactionID string) (Result, error) {
@@ -257,6 +276,40 @@ func replayOrConflict(record ports.WagerRecord, hash string) (Result, error) {
 	return result, nil
 }
 
+func rehydrateTransaction(record ports.WagerRecord) (wager.Transaction, error) {
+	value, err := money.Rehydrate(record.Amount, record.Currency)
+	if err != nil {
+		return wager.Transaction{}, err
+	}
+	var resultBalance *money.Money
+	if record.ResultBalance != nil {
+		result, err := money.Rehydrate(*record.ResultBalance, record.Currency)
+		if err != nil {
+			return wager.Transaction{}, err
+		}
+		resultBalance = &result
+	}
+	return wager.Rehydrate(wager.Input{
+		ID:                             record.ID,
+		ProviderID:                     record.ProviderID,
+		ExternalTransactionID:          record.ExternalTransactionID,
+		IdempotencyKey:                 record.IdempotencyKey,
+		WalletID:                       record.WalletID,
+		PlayerID:                       record.PlayerID,
+		RoundID:                        record.RoundID,
+		GameID:                         record.GameID,
+		Kind:                           record.Kind,
+		Money:                          value,
+		ReferenceExternalTransactionID: record.ReferenceExternalTransactionID,
+		ReferenceTransactionID:         record.ReferenceTransactionID,
+		Status:                         record.Status,
+		PayloadHash:                    record.PayloadHash,
+		ResultBalance:                  resultBalance,
+		FailureCode:                    record.FailureCode,
+		OccurredAt:                     record.CreatedAt,
+	})
+}
+
 func (s *Service) ResumePendingReference(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -265,12 +318,12 @@ func (s *Service) ResumePendingReference(
 	if record.Status != wager.StatusPendingReference {
 		return Result{}, application.ErrInvalid
 	}
-	amount, err := money.New(record.Amount, record.Currency)
+	transaction, err := rehydrateTransaction(record)
 	if err != nil {
 		return Result{}, err
 	}
 	var result Result
-	err = s.applyWithPendingEvent(ctx, tx, record, amount, &result, false)
+	err = s.applyWithPendingEvent(ctx, tx, record, transaction, &result, false)
 	return result, err
 }
 
@@ -287,8 +340,35 @@ func (s *Service) RejectPendingReference(
 		}
 		return Result{}, err
 	}
+	transaction, err := rehydrateTransaction(record)
+	if err != nil {
+		return Result{}, err
+	}
+	balance, err := money.Rehydrate(wallet.Balance, wallet.Currency)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := transaction.Reject(code, balance); err != nil {
+		return Result{}, err
+	}
 	var result Result
-	err = s.reject(ctx, tx, record, wallet.Balance, wallet.Currency, code, &result)
+	err = s.persistTransaction(ctx, tx, transaction)
+	if err == nil {
+		result = resultFromTransaction(transaction)
+		err = s.outbox(
+			ctx,
+			tx,
+			transaction,
+			contracts.EventWagerTransactionRejected,
+			contracts.WagerTransactionRejectedData{
+				TransactionID: transaction.ID(),
+				WalletID:      transaction.WalletID(),
+				Status:        string(transaction.Status()),
+				FailureCode:   code,
+				Balance:       moneyPayload(balance),
+			},
+		)
+	}
 	return result, err
 }
 
@@ -296,146 +376,177 @@ func (s *Service) apply(
 	ctx context.Context,
 	tx pgx.Tx,
 	record ports.WagerRecord,
-	amount money.Money,
 	result *Result,
 ) error {
-	return s.applyWithPendingEvent(ctx, tx, record, amount, result, true)
+	transaction, err := rehydrateTransaction(record)
+	if err != nil {
+		return err
+	}
+	return s.applyWithPendingEvent(ctx, tx, record, transaction, result, true)
 }
 
 func (s *Service) applyWithPendingEvent(
 	ctx context.Context,
 	tx pgx.Tx,
 	record ports.WagerRecord,
-	amount money.Money,
+	transaction wager.Transaction,
 	result *Result,
 	emitPendingEvent bool,
 ) error {
-	wallet, err := s.wallets.LockWallet(ctx, tx, record.WalletID)
+	walletRecord, err := s.wallets.LockWallet(ctx, tx, record.WalletID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return application.ErrNotFound
 		}
 		return err
 	}
-	if wallet.PlayerID != record.PlayerID || wallet.Currency != amount.Currency {
-		return s.reject(ctx, tx, record, wallet.Balance, wallet.Currency, "WALLET_MISMATCH", result)
-	}
-	current, err := money.New(wallet.Balance, wallet.Currency)
+	current, err := money.Rehydrate(walletRecord.Balance, walletRecord.Currency)
 	if err != nil {
 		return err
 	}
-	if record.Kind == wager.KindRefund || record.Kind == wager.KindRollback {
-		reference, err := s.resolveReference(ctx, tx, record, amount)
+	wallet, err := domainwallet.Rehydrate(walletRecord.ID, walletRecord.PlayerID, current, walletRecord.Version)
+	if err != nil {
+		return err
+	}
+	if wallet.PlayerID() != transaction.PlayerID() || wallet.Balance().Currency() != transaction.Money().Currency() {
+		return s.rejectTransaction(ctx, tx, transaction, wallet.Balance(), "WALLET_MISMATCH", result)
+	}
+
+	var referenceKind *wager.Kind
+	if transaction.Kind() == wager.KindRefund || transaction.Kind() == wager.KindRollback {
+		reference, err := s.resolveReference(ctx, tx, record, transaction)
 		if err != nil {
 			if errors.Is(err, application.ErrPending) {
-				result.Balance = &current
-				result.TransactionID, result.Status = record.ID, wager.StatusPendingReference
-				if err := s.update(ctx, tx, record, wager.StatusPendingReference, &current, "REFERENCE_PENDING"); err != nil {
+				if err := transaction.MarkPendingReference(wallet.Balance()); err != nil {
 					return err
 				}
+				if err := s.persistTransaction(ctx, tx, transaction); err != nil {
+					return err
+				}
+				*result = resultFromTransaction(transaction)
 				if !emitPendingEvent {
 					return nil
 				}
 				return s.outbox(
 					ctx,
 					tx,
-					record,
+					transaction,
 					contracts.EventWagerTransactionPendingReference,
 					contracts.WagerTransactionPendingReferenceData{
-						TransactionID: record.ID,
-						WalletID:      record.WalletID,
+						TransactionID: transaction.ID(),
+						WalletID:      transaction.WalletID(),
 						Status:        string(wager.StatusPendingReference),
 						FailureCode:   "REFERENCE_PENDING",
 					},
 				)
 			}
-			return s.reject(ctx, tx, record, wallet.Balance, wallet.Currency, failureCode(err), result)
+			return s.rejectTransaction(ctx, tx, transaction, wallet.Balance(), failureCode(err), result)
 		}
-		record.ReferenceTransactionID = &reference.ID
+		if err := transaction.ResolveReference(reference.ID); err != nil {
+			return err
+		}
+		kind := reference.Kind
+		referenceKind = &kind
 	}
-	if record.Kind == wager.KindWin && record.ReferenceExternalTransactionID != nil {
-		reference, err := s.resolveReference(ctx, tx, record, amount)
+	if transaction.Kind() == wager.KindWin && transaction.ReferenceExternalTransactionID() != nil {
+		reference, err := s.resolveReference(ctx, tx, record, transaction)
 		if err != nil {
-			return s.reject(ctx, tx, record, wallet.Balance, wallet.Currency, failureCode(err), result)
+			return s.rejectTransaction(ctx, tx, transaction, wallet.Balance(), failureCode(err), result)
 		}
-		record.ReferenceTransactionID = &reference.ID
+		if err := transaction.ResolveReference(reference.ID); err != nil {
+			return err
+		}
+		kind := reference.Kind
+		referenceKind = &kind
 	}
 
-	change := int64(0)
-	direction := ""
-	switch record.Kind {
-	case wager.KindBet:
-		change, direction = -amount.Amount, "DEBIT"
-	case wager.KindWin, wager.KindRefund:
-		change, direction = amount.Amount, "CREDIT"
-	case wager.KindRollback:
-		reference, err := s.wagers.FindReference(ctx, tx, providerID(record), *record.ReferenceExternalTransactionID)
-		if err != nil {
+	effect, err := transaction.FinancialEffect(referenceKind)
+	if err != nil {
+		return s.rejectTransaction(ctx, tx, transaction, wallet.Balance(), failureCode(err), result)
+	}
+	if !effect.Applied {
+		if err := transaction.MarkProcessed(wallet.Balance()); err != nil {
 			return err
 		}
-		if reference.Kind == wager.KindBet {
-			change, direction = amount.Amount, "CREDIT"
-		} else {
-			change, direction = -amount.Amount, "DEBIT"
-		}
-	case wager.KindLoss:
-		result.Balance = &current
-		result.TransactionID, result.Status = record.ID, wager.StatusProcessed
-		if err := s.update(ctx, tx, record, wager.StatusProcessed, &current, ""); err != nil {
+		if err := s.persistTransaction(ctx, tx, transaction); err != nil {
 			return err
 		}
+		*result = resultFromTransaction(transaction)
 		return s.outbox(
 			ctx,
 			tx,
-			record,
+			transaction,
 			contracts.EventWagerTransactionProcessed,
 			contracts.WagerTransactionProcessedData{
-				TransactionID: record.ID,
-				WalletID:      record.WalletID,
-				Kind:          string(record.Kind),
-				Status:        string(wager.StatusProcessed),
-				Balance:       moneyPayload(current),
+				TransactionID: transaction.ID(),
+				WalletID:      transaction.WalletID(),
+				Kind:          string(transaction.Kind()),
+				Status:        string(transaction.Status()),
+				Balance:       moneyPayload(wallet.Balance()),
 			},
 		)
 	}
-	afterAmount, err := current.Add(money.Money{Amount: change, Currency: current.Currency})
-	if err != nil || afterAmount.Amount < 0 {
+	if effect.Direction == wager.DirectionDebit {
+		err = wallet.Debit(effect.Money)
+	} else {
+		err = wallet.Credit(effect.Money)
+	}
+	if err != nil {
 		code := "INSUFFICIENT_BALANCE"
-		if record.Kind == wager.KindRefund || record.Kind == wager.KindRollback {
+		if transaction.Kind() == wager.KindRefund || transaction.Kind() == wager.KindRollback {
 			code = "REVERSAL_INSUFFICIENT_BALANCE"
 		}
-		return s.reject(ctx, tx, record, wallet.Balance, wallet.Currency, code, result)
+		return s.rejectTransaction(ctx, tx, transaction, wallet.Balance(), code, result)
 	}
-	after := afterAmount
-	if err := s.wallets.UpdateWallet(ctx, tx, wallet.ID, after.Amount, wallet.Version+1); err != nil {
+	after := wallet.Balance()
+	if err := s.wallets.UpdateWallet(ctx, tx, wallet.ID(), after.MinorUnits(), wallet.Version()); err != nil {
+		return err
+	}
+	direction := ledger.DirectionDebit
+	if effect.Direction == wager.DirectionCredit {
+		direction = ledger.DirectionCredit
+	}
+	entry, err := ledger.New(ledger.EntryInput{
+		ID:            uuid.NewString(),
+		WalletID:      transaction.WalletID(),
+		TransactionID: transaction.ID(),
+		Direction:     direction,
+		Amount:        effect.Money,
+		BalanceBefore: current,
+		BalanceAfter:  after,
+	})
+	if err != nil {
 		return err
 	}
 	if err := s.wagers.InsertLedger(ctx, tx, ports.LedgerRecord{
-		ID:            uuid.NewString(),
-		WalletID:      record.WalletID,
-		TransactionID: record.ID,
-		Direction:     direction,
-		Amount:        amount.Amount,
-		Currency:      amount.Currency,
-		BalanceBefore: current.Amount,
-		BalanceAfter:  after.Amount,
+		ID:            entry.ID(),
+		WalletID:      entry.WalletID(),
+		TransactionID: entry.TransactionID(),
+		Direction:     string(entry.Direction()),
+		Amount:        entry.Amount().MinorUnits(),
+		Currency:      entry.Amount().Currency(),
+		BalanceBefore: entry.BalanceBefore().MinorUnits(),
+		BalanceAfter:  entry.BalanceAfter().MinorUnits(),
 	}); err != nil {
 		return err
 	}
-	if err := s.update(ctx, tx, record, wager.StatusProcessed, &after, ""); err != nil {
+	if err := transaction.MarkProcessed(after); err != nil {
 		return err
 	}
-	result.TransactionID, result.Status, result.Balance = record.ID, wager.StatusProcessed, &after
+	if err := s.persistTransaction(ctx, tx, transaction); err != nil {
+		return err
+	}
+	*result = resultFromTransaction(transaction)
 	if err := s.outbox(
 		ctx,
 		tx,
-		record,
+		transaction,
 		contracts.EventWagerTransactionProcessed,
 		contracts.WagerTransactionProcessedData{
-			TransactionID: record.ID,
-			WalletID:      record.WalletID,
-			Kind:          string(record.Kind),
-			Status:        string(wager.StatusProcessed),
+			TransactionID: transaction.ID(),
+			WalletID:      transaction.WalletID(),
+			Kind:          string(transaction.Kind()),
+			Status:        string(transaction.Status()),
 			Balance:       moneyPayload(after),
 		},
 	); err != nil {
@@ -444,16 +555,16 @@ func (s *Service) applyWithPendingEvent(
 	return s.outbox(
 		ctx,
 		tx,
-		record,
+		transaction,
 		contracts.EventWalletBalanceChanged,
 		contracts.WalletBalanceChangedData{
-			WalletID:      record.WalletID,
-			TransactionID: record.ID,
-			Direction:     direction,
-			Money:         moneyPayload(amount),
+			WalletID:      transaction.WalletID(),
+			TransactionID: transaction.ID(),
+			Direction:     string(direction),
+			Money:         moneyPayload(effect.Money),
 			BalanceBefore: moneyPayload(current),
 			BalanceAfter:  moneyPayload(after),
-			WalletVersion: wallet.Version + 1,
+			WalletVersion: wallet.Version(),
 		},
 	)
 }
@@ -462,9 +573,13 @@ func (s *Service) resolveReference(
 	ctx context.Context,
 	tx pgx.Tx,
 	record ports.WagerRecord,
-	amount money.Money,
+	transaction wager.Transaction,
 ) (ports.WagerRecord, error) {
-	reference, err := s.wagers.FindReferenceForUpdate(ctx, tx, providerID(record), *record.ReferenceExternalTransactionID)
+	referenceExternalID := transaction.ReferenceExternalTransactionID()
+	if referenceExternalID == nil {
+		return ports.WagerRecord{}, wager.ErrReferenceNotValid
+	}
+	reference, err := s.wagers.FindReferenceForUpdate(ctx, tx, providerID(record), *referenceExternalID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ports.WagerRecord{}, application.ErrPending
@@ -474,34 +589,19 @@ func (s *Service) resolveReference(
 	if reference.Status != wager.StatusProcessed {
 		return ports.WagerRecord{}, errors.New("reference not processed")
 	}
-	if reference.PlayerID != record.PlayerID ||
-		reference.WalletID != record.WalletID ||
-		reference.Currency != record.Currency ||
-		reference.RoundID != record.RoundID ||
-		reference.Amount != amount.Amount {
-		return ports.WagerRecord{}, errors.New("reference mismatch")
+	referenceEntity, err := rehydrateTransaction(reference)
+	if err != nil {
+		return ports.WagerRecord{}, err
 	}
-	if record.Kind == wager.KindRefund && reference.Kind != wager.KindBet {
-		return ports.WagerRecord{}, errors.New("refund reference must be bet")
-	}
-	if record.Kind == wager.KindWin {
-		if reference.Kind != wager.KindBet {
-			return ports.WagerRecord{}, errors.New("win reference must be bet")
-		}
-		return reference, nil
-	}
-	if record.Kind == wager.KindRollback &&
-		reference.Kind != wager.KindBet &&
-		reference.Kind != wager.KindWin &&
-		reference.Kind != wager.KindRefund {
-		return ports.WagerRecord{}, errors.New("invalid rollback reference")
+	if err := transaction.ValidateReference(referenceEntity); err != nil {
+		return ports.WagerRecord{}, err
 	}
 	exists, err := s.wagers.HasSuccessfulReversal(
 		ctx,
 		tx,
 		providerID(record),
-		record.Kind,
-		*record.ReferenceExternalTransactionID,
+		transaction.Kind(),
+		*referenceExternalID,
 	)
 	if err != nil {
 		return ports.WagerRecord{}, err
@@ -512,73 +612,56 @@ func (s *Service) resolveReference(
 	return reference, nil
 }
 
-func (s *Service) reject(
+func (s *Service) rejectTransaction(
 	ctx context.Context,
 	tx pgx.Tx,
-	record ports.WagerRecord,
-	balance int64,
-	currency, code string,
+	transaction wager.Transaction,
+	balance money.Money,
+	code string,
 	result *Result,
 ) error {
-	current, err := money.New(balance, currency)
-	if err != nil {
+	if err := transaction.Reject(code, balance); err != nil {
 		return err
 	}
-	if err := s.update(ctx, tx, record, wager.StatusRejected, &current, code); err != nil {
+	if err := s.persistTransaction(ctx, tx, transaction); err != nil {
 		return err
 	}
-	result.TransactionID = record.ID
-	result.Status = wager.StatusRejected
-	result.Balance = &current
-	result.FailureCode = code
+	*result = resultFromTransaction(transaction)
 	return s.outbox(
 		ctx,
 		tx,
-		record,
+		transaction,
 		contracts.EventWagerTransactionRejected,
 		contracts.WagerTransactionRejectedData{
-			TransactionID: record.ID,
-			WalletID:      record.WalletID,
-			Status:        string(wager.StatusRejected),
+			TransactionID: transaction.ID(),
+			WalletID:      transaction.WalletID(),
+			Status:        string(transaction.Status()),
 			FailureCode:   code,
-			Balance:       moneyPayload(current),
+			Balance:       moneyPayload(balance),
 		},
 	)
 }
 
-func (s *Service) update(
+func (s *Service) persistTransaction(
 	ctx context.Context,
 	tx pgx.Tx,
-	record ports.WagerRecord,
-	status wager.Status,
-	balance *money.Money,
-	failureCode string,
+	transaction wager.Transaction,
 ) error {
-	var amount *int64
-	if balance != nil {
-		value := balance.Amount
-		amount = &value
-	}
-	var code *string
-	if failureCode != "" {
-		code = &failureCode
-	}
-	record.Status, record.ResultBalance, record.FailureCode = status, amount, code
-	return s.wagers.UpdateWager(ctx, tx, record)
+	return s.wagers.UpdateWager(ctx, tx, wagerRecordFromTransaction(transaction))
 }
 
 func (s *Service) outbox(
 	ctx context.Context,
 	tx pgx.Tx,
-	record ports.WagerRecord,
+	transaction wager.Transaction,
 	eventType contracts.EventType,
 	data any,
 ) error {
-	payload, err := contracts.MarshalEvent(eventType, record.WalletID, record.ID, 1, data)
+	payload, err := contracts.MarshalEvent(eventType, transaction.WalletID(), transaction.ID(), 1, data)
 	if err != nil {
 		return err
 	}
-	return s.wagers.InsertOutbox(ctx, tx, "wallet", record.WalletID, string(eventType), payload)
+	return s.wagers.InsertOutbox(ctx, tx, "wallet", transaction.WalletID(), string(eventType), payload)
 }
 
 func failureCode(err error) string {
@@ -598,7 +681,49 @@ func failureCode(err error) string {
 }
 
 func moneyPayload(value money.Money) contracts.MoneyInput {
-	return contracts.MoneyInput{Amount: value.String(), Currency: value.Currency}
+	return contracts.MoneyInput{Amount: value.String(), Currency: value.Currency()}
+}
+
+func resultFromTransaction(transaction wager.Transaction) Result {
+	result := Result{
+		TransactionID: transaction.ID(),
+		Status:        transaction.Status(),
+	}
+	if balance := transaction.ResultBalance(); balance != nil {
+		value := *balance
+		result.Balance = &value
+	}
+	if code := transaction.FailureCode(); code != nil {
+		result.FailureCode = *code
+	}
+	return result
+}
+
+func wagerRecordFromTransaction(transaction wager.Transaction) ports.WagerRecord {
+	var resultBalance *int64
+	if balance := transaction.ResultBalance(); balance != nil {
+		value := balance.MinorUnits()
+		resultBalance = &value
+	}
+	return ports.WagerRecord{
+		ID:                             transaction.ID(),
+		ProviderID:                     transaction.ProviderID(),
+		ExternalTransactionID:          transaction.ExternalTransactionID(),
+		IdempotencyKey:                 transaction.IdempotencyKey(),
+		WalletID:                       transaction.WalletID(),
+		PlayerID:                       transaction.PlayerID(),
+		RoundID:                        transaction.RoundID(),
+		GameID:                         transaction.GameID(),
+		Kind:                           transaction.Kind(),
+		Amount:                         transaction.Money().MinorUnits(),
+		Currency:                       transaction.Money().Currency(),
+		ReferenceExternalTransactionID: transaction.ReferenceExternalTransactionID(),
+		ReferenceTransactionID:         transaction.ReferenceTransactionID(),
+		Status:                         transaction.Status(),
+		PayloadHash:                    transaction.PayloadHash(),
+		ResultBalance:                  resultBalance,
+		FailureCode:                    transaction.FailureCode(),
+	}
 }
 
 func providerID(record ports.WagerRecord) string {

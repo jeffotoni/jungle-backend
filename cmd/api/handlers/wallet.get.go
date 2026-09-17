@@ -23,7 +23,7 @@ func (r *Routes) getWallet(c *quick.Ctx) error {
 		PlayerID: result.PlayerID,
 		Balance: models.Money{
 			Amount:   result.Balance.String(),
-			Currency: result.Balance.Currency,
+			Currency: result.Balance.Currency(),
 		},
 		Version: result.Version,
 	})
