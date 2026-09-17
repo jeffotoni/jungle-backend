@@ -98,3 +98,22 @@ func TestRehydrateAllowsInternalNegativeValue(t *testing.T) {
 		t.Fatalf("value=%d want=-125", value.MinorUnits())
 	}
 }
+
+func TestRehydratePreservesPersistedRepresentation(t *testing.T) {
+	value, err := Rehydrate(2500, " brl ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Currency() != " brl " {
+		t.Fatalf("currency=%q was normalized", value.Currency())
+	}
+}
+
+func TestCompareRejectsDifferentCurrencies(t *testing.T) {
+	brl, _ := New(100, "BRL")
+	usd, _ := New(100, "USD")
+
+	if _, err := brl.Compare(usd); err != ErrCurrencyMismatch {
+		t.Fatalf("error=%v want=%v", err, ErrCurrencyMismatch)
+	}
+}

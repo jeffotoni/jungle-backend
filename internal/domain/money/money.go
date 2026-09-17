@@ -29,7 +29,7 @@ func New(amount int64, currency string) (Money, error) {
 }
 
 func Rehydrate(amount int64, currency string) (Money, error) {
-	return New(amount, currency)
+	return Money{amount: amount, currency: currency}, nil
 }
 
 func Zero(currency string) (Money, error) {
