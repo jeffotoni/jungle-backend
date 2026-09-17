@@ -18,7 +18,7 @@ import (
 
 func TestLiveEndpoint(t *testing.T) {
 	verifier := apiauth.NewVerifier("issuer", "audience", "wallet-internal")
-	server := NewRouter(nil, nil, verifier, nil)
+	server := NewRouter(nil, nil, verifier, nil, nil, "", time.Second)
 	request := httptest.NewRequest(http.MethodGet, "/health/live", nil)
 	recorder := httptest.NewRecorder()
 
@@ -31,7 +31,7 @@ func TestLiveEndpoint(t *testing.T) {
 
 func TestWagerEndpointRequiresAuthentication(t *testing.T) {
 	verifier := apiauth.NewVerifier("issuer", "audience", "wallet-internal")
-	server := NewRouter(nil, nil, verifier, nil)
+	server := NewRouter(nil, nil, verifier, nil, nil, "", time.Second)
 	body := strings.NewReader(`{
 		"providerId":"provider-a",
 		"externalTransactionId":"external-1",
@@ -55,7 +55,7 @@ func TestWagerEndpointRequiresAuthentication(t *testing.T) {
 
 func TestProviderEndpointRejectsAnotherProvider(t *testing.T) {
 	verifier, token := newOIDCTestVerifier(t, "provider-a", nil)
-	server := NewRouter(nil, nil, verifier, nil)
+	server := NewRouter(nil, nil, verifier, nil, nil, "", time.Second)
 	request := httptest.NewRequest(
 		http.MethodGet,
 		"/providers/provider-b/wagering/transactions/external-1",
@@ -73,7 +73,7 @@ func TestProviderEndpointRejectsAnotherProvider(t *testing.T) {
 
 func TestLedgerEndpointRejectsInvalidCursor(t *testing.T) {
 	verifier, token := newOIDCTestVerifier(t, "wallet-internal", []string{"wallet-internal"})
-	server := NewRouter(nil, nil, verifier, nil)
+	server := NewRouter(nil, nil, verifier, nil, nil, "", time.Second)
 	request := httptest.NewRequest(
 		http.MethodGet,
 		"/wallets/516be6a5-8338-4560-a723-0fc1e6e6e801/ledger?cursor=invalid",

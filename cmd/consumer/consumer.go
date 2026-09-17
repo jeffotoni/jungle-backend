@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 type sqsClient interface {
 	ReceiveMessageWithContext(context.Context, *sqs.ReceiveMessageInput, ...request.Option) (*sqs.ReceiveMessageOutput, error)
 	DeleteMessageWithContext(context.Context, *sqs.DeleteMessageInput, ...request.Option) (*sqs.DeleteMessageOutput, error)
+	ChangeMessageVisibilityWithContext(context.Context, *sqs.ChangeMessageVisibilityInput, ...request.Option) (*sqs.ChangeMessageVisibilityOutput, error)
 }
 
 type messageEnvelope struct {
@@ -43,6 +45,9 @@ func (c *Consumer) run(ctx context.Context) {
 			MaxNumberOfMessages: aws.Int64(c.maxMessages),
 			WaitTimeSeconds:     aws.Int64(c.waitSecond),
 			VisibilityTimeout:   aws.Int64(c.visibilitySecond),
+			MessageSystemAttributeNames: []*string{
+				aws.String("ApproximateReceiveCount"),
+			},
 		})
 		if err != nil {
 			if ctx.Err() != nil {
@@ -66,6 +71,9 @@ func (c *Consumer) run(ctx context.Context) {
 			result, err := c.handleMessage(ctx, message)
 			if err != nil && !errors.Is(err, errDuplicateMessage) {
 				c.logError(ctx, "process", err, errors.Is(err, errPermanentMessage), result.MessageID)
+				if !errors.Is(err, errPermanentMessage) {
+					c.retryMessage(ctx, message)
+				}
 				continue
 			}
 			if result.Duplicate {
@@ -90,6 +98,66 @@ func (c *Consumer) run(ctx context.Context) {
 			c.deleteMessage(ctx, message)
 		}
 	}
+}
+
+func (c *Consumer) retryMessage(ctx context.Context, message *sqs.Message) {
+	if message == nil || message.ReceiptHandle == nil {
+		return
+	}
+	attempt := receiveCount(message)
+	delay := retryDelay(attempt, c.retryBase, c.retryMax)
+	_, err := c.client.ChangeMessageVisibilityWithContext(ctx, &sqs.ChangeMessageVisibilityInput{
+		QueueUrl:          aws.String(c.queueURL),
+		ReceiptHandle:     message.ReceiptHandle,
+		VisibilityTimeout: aws.Int64(durationSeconds(delay)),
+	})
+	if err != nil {
+		c.logError(ctx, "change_visibility", err, false, aws.StringValue(message.MessageId))
+		return
+	}
+	_ = c.logger.Warn().
+		Ctx(ctx).
+		Component("sqs").
+		Action("retry").
+		Str("messageId", aws.StringValue(message.MessageId)).
+		Int("attempt", attempt).
+		Int64("visibilityTimeoutSeconds", durationSeconds(delay)).
+		Msg("transient failure scheduled for retry").
+		Send()
+}
+
+func receiveCount(message *sqs.Message) int {
+	if message == nil || message.Attributes == nil {
+		return 1
+	}
+	value, err := strconv.Atoi(aws.StringValue(message.Attributes["ApproximateReceiveCount"]))
+	if err != nil || value < 1 {
+		return 1
+	}
+	return value
+}
+
+func retryDelay(attempt int, base, max time.Duration) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if base <= 0 {
+		base = time.Second
+	}
+	if max < base {
+		max = base
+	}
+	delay := base
+	for current := 1; current < attempt; current++ {
+		if delay >= max || delay > max/2 {
+			return max
+		}
+		delay *= 2
+	}
+	if delay > max {
+		return max
+	}
+	return delay
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration) bool {

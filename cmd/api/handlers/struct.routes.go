@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	apiauth "github.com/jeffotoni/jungle-backend-challenge/cmd/api/auth"
@@ -9,8 +11,11 @@ import (
 )
 
 type Routes struct {
-	wallets *appwallet.Service
-	wagers  *appwager.Service
-	auth    *apiauth.Verifier
-	pool    *pgxpool.Pool
+	wallets       *appwallet.Service
+	wagers        *appwager.Service
+	auth          *apiauth.Verifier
+	pool          *pgxpool.Pool
+	sqs           SQSHealthClient
+	queueURL      string
+	healthTimeout time.Duration
 }

@@ -16,6 +16,8 @@ var (
 	VISIBILITY_TIMEOUT  = env.GetDuration("VISIBILITY_TIMEOUT", 30*time.Second)
 	SQS_WAIT_TIME       = env.GetDuration("SQS_WAIT_TIME", 20*time.Second)
 	SQS_MAX_MESSAGES    = env.GetInt("SQS_MAX_MESSAGES", 10)
+	RETRY_BASE          = env.GetDuration("RETRY_BASE", time.Second)
+	RETRY_MAX           = env.GetDuration("RETRY_MAX", time.Minute)
 	CONSUMER_NAME       = env.GetString("CONSUMER_NAME", "wager-consumer")
 	LOG_LEVEL           = env.GetString("LOG_LEVEL", string(log.DEBUG))
 	TRACE_ID            = env.GetString("TRACE_ID", "traceId")

@@ -2,7 +2,12 @@ package fxmodules
 
 import (
 	"strings"
+	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jeffotoni/log"
 	"go.uber.org/fx"
@@ -38,6 +43,15 @@ var API = fx.Module(
 			level := strings.ToUpper(strings.TrimSpace(apiconfig.LOG_LEVEL))
 			return level == string(log.DEBUG) || level == string(log.TRACE)
 		},
+		func() string { return apiconfig.SQS_WAGER_QUEUE_URL },
+		func() time.Duration { return apiconfig.SQS_HEALTH_TIMEOUT },
+		func() handlers.SQSHealthClient {
+			client, err := newAPIHealthSQSClient()
+			if err != nil {
+				return nil
+			}
+			return client
+		},
 		func(lc fx.Lifecycle) (*pgxpool.Pool, error) { return postgres.NewPool(lc, apiconfig.DATABASE_URL) },
 		postgres.NewStore,
 		func(store *postgres.Store) ports.WalletStore { return store },
@@ -53,3 +67,16 @@ var API = fx.Module(
 	),
 	fx.Invoke(func(*httpserver.Server) {}),
 )
+
+func newAPIHealthSQSClient() (*sqs.SQS, error) {
+	awsConfig := aws.NewConfig().WithRegion(apiconfig.AWS_REGION)
+	if apiconfig.SQS_ENDPOINT_URL != "" {
+		awsConfig = awsConfig.WithEndpoint(apiconfig.SQS_ENDPOINT_URL).
+			WithCredentials(credentials.NewStaticCredentials("test", "test", ""))
+	}
+	sess, err := session.NewSession(awsConfig)
+	if err != nil {
+		return nil, err
+	}
+	return sqs.New(sess), nil
+}

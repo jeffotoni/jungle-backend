@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jeffotoni/quick"
 
@@ -14,9 +16,23 @@ func NewRouter(
 	wagers *appwager.Service,
 	verifier *apiauth.Verifier,
 	pool *pgxpool.Pool,
+	sqsClient SQSHealthClient,
+	queueURL string,
+	healthTimeout time.Duration,
 ) *quick.Quick {
 	q := quick.New()
-	routes := &Routes{wallets: wallets, wagers: wagers, auth: verifier, pool: pool}
+	routes := &Routes{
+		wallets:       wallets,
+		wagers:        wagers,
+		auth:          verifier,
+		pool:          pool,
+		sqs:           sqsClient,
+		queueURL:      queueURL,
+		healthTimeout: healthTimeout,
+	}
+	if routes.healthTimeout <= 0 {
+		routes.healthTimeout = time.Second
+	}
 
 	q.Get("/health/live", routes.live)
 	q.Get("/health/ready", routes.ready)

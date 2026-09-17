@@ -69,6 +69,8 @@ type Consumer struct {
 	visibilitySecond int64
 	waitSecond       int64
 	maxMessages      int64
+	retryBase        time.Duration
+	retryMax         time.Duration
 	cancel           context.CancelFunc
 	done             chan struct{}
 }
@@ -92,6 +94,8 @@ func NewConsumer(
 		visibilitySecond: durationSeconds(config.VISIBILITY_TIMEOUT),
 		waitSecond:       durationSeconds(config.SQS_WAIT_TIME),
 		maxMessages:      int64(config.SQS_MAX_MESSAGES),
+		retryBase:        config.RETRY_BASE,
+		retryMax:         config.RETRY_MAX,
 		done:             make(chan struct{}),
 	}
 	if c.visibilitySecond <= 0 {
@@ -102,6 +106,12 @@ func NewConsumer(
 	}
 	if c.maxMessages <= 0 || c.maxMessages > 10 {
 		c.maxMessages = 10
+	}
+	if c.retryBase <= 0 {
+		c.retryBase = time.Second
+	}
+	if c.retryMax < c.retryBase {
+		c.retryMax = time.Minute
 	}
 	lc.Append(fx.Hook{
 		OnStart: func(context.Context) error {
