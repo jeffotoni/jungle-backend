@@ -190,6 +190,52 @@ func (c *Consumer) handleMessage(ctx context.Context, message *sqs.Message) (mes
 		result.Status = string(processed.Status)
 		return c.inbox.CompleteInbox(ctx, tx, c.consumerName, envelope.MessageID)
 	})
+	var permanent *application.PermanentFailure
+	if errors.As(err, &permanent) {
+		return c.persistPermanentFailure(ctx, envelope, hash, result, permanent.Code)
+	}
+	return result, err
+}
+
+func (c *Consumer) persistPermanentFailure(
+	ctx context.Context,
+	envelope messageEnvelope,
+	hash string,
+	result messageResult,
+	code string,
+) (messageResult, error) {
+	err := c.tx.WithinTx(ctx, func(tx pgx.Tx) error {
+		existing, findErr := c.inbox.FindInbox(ctx, tx, c.consumerName, envelope.MessageID)
+		if findErr == nil {
+			if existing.PayloadHash != hash {
+				return fmt.Errorf("%w: inbox payload mismatch", errPermanentMessage)
+			}
+			result.Duplicate = true
+			return errDuplicateMessage
+		}
+		if !errors.Is(findErr, pgx.ErrNoRows) {
+			return findErr
+		}
+		inserted, err := c.inbox.InsertInbox(ctx, tx, ports.InboxRecord{
+			ConsumerName: c.consumerName,
+			MessageID:    envelope.MessageID,
+			PayloadHash:  hash,
+			Status:       "PROCESSING",
+		})
+		if err != nil {
+			return err
+		}
+		if !inserted {
+			return errDuplicateMessage
+		}
+		failed, err := c.wagers.PersistPermanentFailureInTx(ctx, tx, envelope.Data, code)
+		if err != nil {
+			return err
+		}
+		result.TransactionID = failed.TransactionID
+		result.Status = string(failed.Status)
+		return c.inbox.CompleteInbox(ctx, tx, c.consumerName, envelope.MessageID)
+	})
 	return result, err
 }
 

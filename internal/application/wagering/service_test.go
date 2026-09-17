@@ -22,10 +22,12 @@ func (wageringTxFake) WithinTx(ctx context.Context, fn func(pgx.Tx) error) error
 }
 
 type wageringStoreFake struct {
-	wallets map[string]ports.WalletRecord
-	wagers  []ports.WagerRecord
-	ledger  []ports.LedgerRecord
-	outbox  []string
+	wallets       map[string]ports.WalletRecord
+	wagers        []ports.WagerRecord
+	ledger        []ports.LedgerRecord
+	outbox        []string
+	lockError     error
+	lockErrorOnce bool
 }
 
 func (s *wageringStoreFake) CreateWallet(context.Context, pgx.Tx, ports.WalletRecord) error {
@@ -41,6 +43,10 @@ func (s *wageringStoreFake) GetWallet(_ context.Context, _ pgx.Tx, id string) (p
 }
 
 func (s *wageringStoreFake) LockWallet(ctx context.Context, tx pgx.Tx, id string) (ports.WalletRecord, error) {
+	if s.lockErrorOnce {
+		s.lockErrorOnce = false
+		return ports.WalletRecord{}, s.lockError
+	}
 	return s.GetWallet(ctx, tx, id)
 }
 
@@ -343,6 +349,50 @@ func TestProcessReversalRejectsReferenceMismatch(t *testing.T) {
 	}
 	if store.wallets[testWalletID].Balance != 1500 || len(store.ledger) != 1 {
 		t.Fatalf("reference mismatch changed financial state: wallet=%+v ledger=%d", store.wallets[testWalletID], len(store.ledger))
+	}
+}
+
+func TestPersistPermanentFailureDoesNotCreateRejectionEvent(t *testing.T) {
+	service, store := newWageringService(2500)
+	request := testWager("BET", "failed-001", "failed-key-001", "10.00")
+
+	result, err := service.PersistPermanentFailure(context.Background(), request, "OUTBOX_SCHEMA_FAILURE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != wager.StatusFailed || result.FailureCode != "OUTBOX_SCHEMA_FAILURE" || result.Balance == nil || result.Balance.MinorUnits() != 2500 {
+		t.Fatalf("unexpected failed result: %+v", result)
+	}
+	if len(store.wagers) != 1 || store.wagers[0].Status != wager.StatusFailed {
+		t.Fatalf("unexpected failed wager: %+v", store.wagers)
+	}
+	if len(store.ledger) != 0 || len(store.outbox) != 0 || store.wallets[testWalletID].Balance != 2500 {
+		t.Fatalf("permanent failure changed financial state: ledger=%d outbox=%d wallet=%+v", len(store.ledger), len(store.outbox), store.wallets[testWalletID])
+	}
+
+	replay, err := service.PersistPermanentFailure(context.Background(), request, "OUTBOX_SCHEMA_FAILURE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !replay.Replay || replay.TransactionID != result.TransactionID || replay.Status != wager.StatusFailed {
+		t.Fatalf("unexpected failed replay: %+v", replay)
+	}
+}
+
+func TestProcessPersistsExplicitPermanentFailure(t *testing.T) {
+	service, store := newWageringService(2500)
+	store.lockError = application.NewPermanentFailure("WALLET_LOCK_PERMANENT_FAILURE", errors.New("lock unavailable"))
+	store.lockErrorOnce = true
+
+	result, err := service.Process(context.Background(), testWager("BET", "failed-002", "failed-key-002", "10.00"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != wager.StatusFailed || result.FailureCode != "WALLET_LOCK_PERMANENT_FAILURE" {
+		t.Fatalf("unexpected failed result: %+v", result)
+	}
+	if len(store.wagers) != 1 || len(store.ledger) != 0 || len(store.outbox) != 0 {
+		t.Fatalf("unexpected permanent failure state: wagers=%d ledger=%d outbox=%d", len(store.wagers), len(store.ledger), len(store.outbox))
 	}
 }
 

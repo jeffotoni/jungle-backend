@@ -48,6 +48,10 @@ func (s *Service) Process(ctx context.Context, request contracts.WagerRequest) (
 	if errors.Is(err, ports.ErrUniqueViolation) {
 		return Result{}, application.ErrConflict
 	}
+	var permanent *application.PermanentFailure
+	if errors.As(err, &permanent) {
+		return s.PersistPermanentFailure(ctx, request, permanent.Code)
+	}
 	return result, err
 }
 
@@ -66,6 +70,103 @@ func (s *Service) ProcessInTx(
 		return Result{}, application.ErrConflict
 	}
 	return result, err
+}
+
+func (s *Service) PersistPermanentFailure(
+	ctx context.Context,
+	request contracts.WagerRequest,
+	code string,
+) (Result, error) {
+	request, base, err := prepareRequest(request)
+	if err != nil {
+		return Result{}, err
+	}
+	var result Result
+	err = s.tx.WithinTx(ctx, func(tx pgx.Tx) error {
+		result, err = s.persistPermanentFailureInTx(ctx, tx, request, base, code)
+		return err
+	})
+	return result, err
+}
+
+func (s *Service) PersistPermanentFailureInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	request contracts.WagerRequest,
+	code string,
+) (Result, error) {
+	request, base, err := prepareRequest(request)
+	if err != nil {
+		return Result{}, err
+	}
+	return s.persistPermanentFailureInTx(ctx, tx, request, base, code)
+}
+
+func (s *Service) persistPermanentFailureInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	request contracts.WagerRequest,
+	base ports.WagerRecord,
+	code string,
+) (Result, error) {
+	if strings.TrimSpace(code) == "" {
+		code = "PERMANENT_INFRASTRUCTURE_FAILURE"
+	}
+	for _, found := range []func(context.Context, pgx.Tx) (ports.WagerRecord, error){
+		func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
+			return s.wagers.FindByIdempotency(ctx, tx, request.ProviderID, request.IdempotencyKey)
+		},
+		func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
+			return s.wagers.FindByBusiness(ctx, tx, request.ProviderID, request.ExternalTransactionID)
+		},
+	} {
+		existing, findErr := found(ctx, tx)
+		if findErr == nil {
+			return replayOrConflict(existing, base.PayloadHash)
+		}
+		if !errors.Is(findErr, pgx.ErrNoRows) {
+			return Result{}, findErr
+		}
+	}
+	walletRecord, err := s.wallets.LockWallet(ctx, tx, request.WalletID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Result{}, application.ErrNotFound
+		}
+		return Result{}, err
+	}
+	balance, err := money.Rehydrate(walletRecord.Balance, walletRecord.Currency)
+	if err != nil {
+		return Result{}, err
+	}
+	transaction, err := rehydrateTransaction(base)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := transaction.Fail(code, balance); err != nil {
+		return Result{}, err
+	}
+	inserted, err := s.wagers.InsertWager(ctx, tx, wagerRecordFromTransaction(transaction))
+	if err != nil {
+		return Result{}, err
+	}
+	if !inserted {
+		for _, found := range []func(context.Context, pgx.Tx) (ports.WagerRecord, error){
+			func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
+				return s.wagers.FindByIdempotency(ctx, tx, request.ProviderID, request.IdempotencyKey)
+			},
+			func(ctx context.Context, tx pgx.Tx) (ports.WagerRecord, error) {
+				return s.wagers.FindByBusiness(ctx, tx, request.ProviderID, request.ExternalTransactionID)
+			},
+		} {
+			existing, findErr := found(ctx, tx)
+			if findErr == nil {
+				return replayOrConflict(existing, base.PayloadHash)
+			}
+		}
+		return Result{}, application.ErrConflict
+	}
+	return resultFromTransaction(transaction), nil
 }
 
 func prepareRequest(request contracts.WagerRequest) (contracts.WagerRequest, ports.WagerRecord, error) {
