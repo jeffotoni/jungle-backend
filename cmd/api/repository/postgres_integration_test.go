@@ -28,8 +28,8 @@ func TestPostgreSQLConcurrentBetsProtectWalletBalance(t *testing.T) {
 
 	service := appwager.NewService(
 		postgres.NewTxManager(pool),
-		NewStore(pool),
-		NewStore(pool),
+		postgres.NewStore(pool),
+		postgres.NewStore(pool),
 	)
 	results := make(chan appwager.Result, 2)
 	errorsCh := make(chan error, 2)

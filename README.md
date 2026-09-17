@@ -132,6 +132,14 @@ The pending-reference continuation worker.
 
 Documentation: [`cmd/reference-worker/README.md`](cmd/reference-worker/README.md)
 
+### `cmd/swagger`
+
+The embedded Swagger service serves the API documentation independently from the API process.
+
+- Serves the OpenAPI UI on `http://localhost:8082`.
+- Serves the OpenAPI specification from [`cmd/swagger/api.yaml`](cmd/swagger/api.yaml).
+- Runs as a separate Compose service and container.
+
 ## Shared application flow
 
 API and Consumer use the same Application/Domain path. The transport is different, but the financial behavior is shared:
@@ -268,6 +276,7 @@ The Compose services are:
 - `publisher`: transactional outbox publisher.
 - `reference-worker`: pending-reference processor.
 - `swagger`: embedded API documentation on `http://localhost:8082`.
+- `api2`: second API instance on `http://localhost:8083`, used for distributed concurrency validation.
 
 ## Run the complete stack from zero
 
@@ -285,7 +294,7 @@ docker compose down -v --remove-orphans
 
 The migrations run automatically inside the PostgreSQL container. There is no separate migration service or manual migration command in the first-time setup.
 
-The six migration `up` files are mounted by Docker Compose into PostgreSQL's initialization directory. The official PostgreSQL image executes them in filename order while creating the `postgres_data` volume:
+The seven migration `up` files are mounted by Docker Compose into PostgreSQL's initialization directory. The official PostgreSQL image executes them in filename order while creating the `postgres_data` volume:
 
 ```text
 docker compose
@@ -302,6 +311,7 @@ postgres container
       +--> 004_outbox_claim_lease.sql
       +--> 005_pending_reference_retry.sql
       +--> 006_financial_constraints.sql
+      +--> 007_reversal_reference_constraint.sql
       |
       v
 Complete PostgreSQL schema
@@ -396,6 +406,7 @@ All services should be `Up`. The exposed endpoints are:
 
 ```text
 API:     http://localhost:8080
+API 2:   http://localhost:8083 (only for the concurrency test)
 Swagger: http://localhost:8082
 Keycloak: http://localhost:8081
 SQS:     http://localhost:4566
@@ -631,6 +642,320 @@ docker compose logs --tail=50 --no-color publisher
 
 Expected log actions include `startup` and `publish`.
 
+## Minimal integration validation runbook
+
+This runbook records the lean validation performed against the real local stack. It covers the persistence, asynchronous processing, authentication, cross-channel idempotency, pending-reference expiration, and distributed concurrency paths without using k6.
+
+### 1. PostgreSQL repository
+
+Run the repository integration tests against the real PostgreSQL container:
+
+```bash
+JUNGLE_INTEGRATION=1 \
+go test -v ./cmd/api/repository
+```
+
+Validated:
+
+- financial constraints;
+- concurrency protecting the wallet balance;
+- transactional rollback;
+- cursor, UUID, and repository utilities.
+
+Expected result:
+
+```text
+🟢 PostgreSQL real
+```
+
+Observed validation output:
+
+```text
+=== RUN   TestPostgreSQLFinancialConstraints
+--- PASS: TestPostgreSQLFinancialConstraints
+=== RUN   TestParseUUID
+--- PASS: TestParseUUID
+=== RUN   TestLedgerCursorRoundTrip
+--- PASS: TestLedgerCursorRoundTrip
+=== RUN   TestLedgerCursorEmpty
+--- PASS: TestLedgerCursorEmpty
+=== RUN   TestLedgerCursorRejectsInvalidValues
+--- PASS: TestLedgerCursorRejectsInvalidValues
+=== RUN   TestNullIf
+--- PASS: TestNullIf
+=== RUN   TestPostgreSQLConcurrentBetsProtectWalletBalance
+--- PASS: TestPostgreSQLConcurrentBetsProtectWalletBalance
+=== RUN   TestPostgreSQLTransactionRollsBackFinancialWrites
+--- PASS: TestPostgreSQLTransactionRollsBackFinancialWrites
+PASS
+ok github.com/jeffotoni/jungle-backend/cmd/api/repository
+```
+
+### 2. Consumer and LocalStack
+
+Run the real SQS integration tests:
+
+```bash
+JUNGLE_INTEGRATION=1 \
+go test -v ./cmd/consumer
+```
+
+The covered scenarios include:
+
+```text
+TestIntegrationConsumerHappyPath
+TestIntegrationConsumerInboxRedelivery
+TestIntegrationConsumerInvalidMessageReachesDLQ
+TestReceiveCount
+TestRetryDelayUsesCappedExponentialBackoff
+TestRetryMessageChangesVisibilityUsingReceiveCount
+```
+
+Expected result:
+
+```text
+🟢 Consumer happy path
+🟢 Inbox / redelivery
+🟢 DLQ
+🟢 Retry / visibility timeout
+```
+
+Observed validation output:
+
+```text
+TestIntegrationConsumerHappyPath              PASS
+  message processed: status=PROCESSED duplicate=false
+  message deleted after durable processing
+
+TestIntegrationConsumerInboxRedelivery        PASS
+  first delivery: status=PROCESSED duplicate=false
+  redelivery: duplicate message ignored
+  both SQS messages deleted
+
+TestIntegrationConsumerInvalidMessageReachesDLQ PASS
+  permanent SQS message error: incomplete envelope
+  message remained available for redrive
+
+TestReceiveCount                               PASS
+TestRetryDelayUsesCappedExponentialBackoff     PASS
+TestRetryMessageChangesVisibilityUsingReceiveCount PASS
+
+PASS
+ok github.com/jeffotoni/jungle-backend/cmd/consumer
+```
+
+`TestIntegrationHTTPAndSQSShareFinancialIdempotency` was skipped in this execution because `INTEGRATION_API_URL` and `INTEGRATION_PROVIDER_TOKEN` were not provided. Run the dedicated command in section 5 to execute that scenario.
+
+### 3. Generate Keycloak tokens
+
+The API and integration tests use tokens issued by the local Keycloak realm.
+
+Provider token:
+
+```bash
+export PROVIDER_TOKEN="$(curl -fsS -X POST "$KEYCLOAK_TOKEN_URL" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "client_id=$PROVIDER_CLIENT_ID" \
+  --data-urlencode "client_secret=$PROVIDER_CLIENT_SECRET" \
+  | jq -er '.access_token')"
+```
+
+Internal token:
+
+```bash
+export INTERNAL_TOKEN="$(curl -fsS -X POST "$KEYCLOAK_TOKEN_URL" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "client_id=$INTERNAL_CLIENT_ID" \
+  --data-urlencode "client_secret=$INTERNAL_CLIENT_SECRET" \
+  | jq -er '.access_token')"
+```
+
+Check that both variables contain a token without printing the credentials:
+
+```bash
+echo ${#PROVIDER_TOKEN}
+echo ${#INTERNAL_TOKEN}
+```
+
+### 4. Verify the internal API token
+
+Create a wallet through the authenticated API:
+
+```bash
+curl -i -X POST "http://localhost:8080/wallets" \
+  -H "Authorization: Bearer $INTERNAL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "playerId":"token-test",
+    "initialBalance":{
+      "amount":"100.00",
+      "currency":"BRL"
+    }
+  }'
+```
+
+Expected result:
+
+```text
+HTTP/1.1 201 Created
+```
+
+### 5. Cross-channel HTTP and SQS
+
+The same business operation is submitted through the HTTP API and the SQS consumer. The test uses the same business identity and idempotency key and verifies that only one financial effect is persisted:
+
+```bash
+JUNGLE_INTEGRATION=1 \
+INTEGRATION_API_URL="http://localhost:8080" \
+INTEGRATION_PROVIDER_TOKEN="$PROVIDER_TOKEN" \
+go test -v ./cmd/consumer \
+  -run TestIntegrationHTTPAndSQSShareFinancialIdempotency
+```
+
+Expected result:
+
+```text
+🟢 HTTP + SQS share financial idempotency
+```
+
+Observed validation output:
+
+```text
+TestIntegrationHTTPAndSQSShareFinancialIdempotency PASS
+  message processed: status=PROCESSED duplicate=false
+  message deleted after durable processing
+
+PASS
+ok github.com/jeffotoni/jungle-backend/cmd/consumer
+```
+
+### 6. Pending-reference expiration
+
+Run the real reference worker integration test for a REFUND or ROLLBACK whose reference remains unavailable:
+
+```bash
+JUNGLE_INTEGRATION=1 \
+go test -v ./cmd/reference-worker
+```
+
+The expected terminal result is:
+
+```text
+status=REJECTED
+failureCode=REFERENCE_NOT_FOUND
+🟢 Pending reference expiration
+```
+
+Observed validation output:
+
+```text
+TestIntegrationPendingReferenceExpires PASS
+  status=REJECTED attempts=1 failureCode=REFERENCE_NOT_FOUND
+
+TestReferenceRetryDelay PASS
+TestReferenceExpired PASS
+
+PASS
+ok github.com/jeffotoni/jungle-backend/cmd/reference-worker
+```
+
+### 7. Two independent API instances
+
+The distributed concurrency check uses two API instances that share PostgreSQL, Keycloak, and LocalStack:
+
+```text
+api  -> localhost:8080
+api2 -> localhost:8083
+```
+
+Start or rebuild both instances:
+
+```bash
+docker compose up -d --build api api2
+```
+
+Confirm the services:
+
+```bash
+docker compose ps
+```
+
+Execute the acceptance script:
+
+```bash
+INTERNAL_TOKEN="$INTERNAL_TOKEN" \
+PROVIDER_TOKEN="$PROVIDER_TOKEN" \
+./scripts/test-concurrent-bets.sh docker
+```
+
+The script sends two simultaneous BET operations:
+
+```text
+initial balance = 100.00
+
+API 1 -> BET 80.00
+API 2 -> BET 80.00
+```
+
+Expected result:
+
+```text
+bet 1: HTTP 200 result=PROCESSED
+bet 2: HTTP 422 result=REJECTED
+database wallet=2000|2
+ledger debits=1
+
+PASS
+two independent API processes passed:
+processed=1 rejected=1 balance=2000 ledger_debits=1
+```
+
+This confirms that only one BET changes the balance, the final balance is `20.00`, and PostgreSQL protects the operation across independent processes.
+
+Observed validation output:
+
+```text
+mode=docker
+api1=http://127.0.0.1:8080
+api2=http://127.0.0.1:8083
+both APIs are responding
+creating wallet...
+wallet created: 1af6fb86-bc4e-4962-a59b-aab37043677d
+sending concurrent bets...
+bet 1: HTTP 200 result=PROCESSED
+bet 2: HTTP 422 result=REJECTED
+database wallet=2000|2
+ledger debits=1
+
+PASS
+two independent API processes passed:
+processed=1 rejected=1 balance=2000 ledger_debits=1
+```
+
+### Troubleshooting port conflicts
+
+If an endpoint unexpectedly returns `404`, first confirm that the request reaches the intended process. A different local process may be listening on the same port:
+
+```bash
+lsof -iTCP:8080 -sTCP:LISTEN
+lsof -iTCP:8083 -sTCP:LISTEN
+docker compose ps
+```
+
+### Validation status
+
+```text
+🟢 PostgreSQL real
+🟢 Consumer + LocalStack
+🟢 Inbox / redelivery
+🟢 DLQ / retry
+🟢 Cross-channel HTTP + SQS
+🟢 Pending reference expiration
+🟢 Concurrency between two independent API instances
+```
+
 ## Stop or reset the local stack
 
 Stop the services while preserving the PostgreSQL volume:
@@ -644,6 +969,8 @@ Stop the services and erase the local database so the migrations run again on th
 ```bash
 docker compose down -v --remove-orphans
 docker compose up -d postgres
+docker compose up -d keycloak localstack
+docker compose up -d --build api consumer publisher reference-worker swagger
 ```
 
-After PostgreSQL becomes healthy, repeat the complete startup sequence from [Start Keycloak and LocalStack](#3-start-keycloak-and-localstack).
+After PostgreSQL becomes healthy, the commands above start Keycloak, LocalStack and the regular application processes. Start `api2` separately only when running the distributed concurrency test in section 7.
