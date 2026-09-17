@@ -488,13 +488,13 @@ test -n "$PROVIDER_TOKEN" && echo "provider token ok"
 Use a unique player identifier so the request does not conflict with an existing wallet:
 
 ```bash
-export PLAYER_ID="compose-player-$(date +%s)"
+export WALLET_PLAYER_ID="compose-player-$(date +%s)"
 
 curl -i -X POST "$API/wallets" \
   -H "Authorization: Bearer $INTERNAL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "playerId": "'"$PLAYER_ID"'",
+    "playerId": "'"$WALLET_PLAYER_ID"'",
     "initialBalance": {
       "amount": "25.00",
       "currency": "BRL"
@@ -508,13 +508,19 @@ The expected status is `201 Created`. Copy the returned wallet ID and export it:
 export WALLET_ID="<wallet-id-from-response>"
 ```
 
-Confirm that the wallet and its opening balance were persisted:
+Query PostgreSQL to retrieve the player ID associated with the wallet:
 
 ```bash
 docker compose exec -T postgres psql \
   -U jungle \
   -d jungle \
   -c "SELECT id, player_id, balance, currency, version FROM wallets WHERE id = '$WALLET_ID';"
+```
+
+Copy the `player_id` returned by PostgreSQL and export it for the SQS test:
+
+```bash
+export PLAYER_ID="<player-id-from-postgres>"
 ```
 
 The expected balance is `2500` minor units and the initial version is `1`.
