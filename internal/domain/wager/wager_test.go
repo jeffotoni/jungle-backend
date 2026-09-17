@@ -3,7 +3,7 @@ package wager
 import (
 	"testing"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend/internal/domain/money"
 )
 
 func TestTransactionTransitions(t *testing.T) {

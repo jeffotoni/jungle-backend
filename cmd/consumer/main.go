@@ -12,10 +12,10 @@ import (
 	"github.com/jeffotoni/log"
 	"go.uber.org/fx"
 
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/consumer/config"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	appwager "github.com/jeffotoni/jungle-backend-challenge/internal/application/wagering"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/repository/postgres"
+	"github.com/jeffotoni/jungle-backend/cmd/consumer/config"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	appwager "github.com/jeffotoni/jungle-backend/internal/application/wagering"
+	"github.com/jeffotoni/jungle-backend/internal/repository/postgres"
 )
 
 func newSQSClient() (*sqs.SQS, error) {

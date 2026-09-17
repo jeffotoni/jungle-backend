@@ -14,9 +14,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/contracts"
+	"github.com/jeffotoni/jungle-backend/internal/application"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/contracts"
 )
 
 type sqsClient interface {

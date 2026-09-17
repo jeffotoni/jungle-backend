@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/models"
-	appwager "github.com/jeffotoni/jungle-backend-challenge/internal/application/wagering"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/contracts"
+	"github.com/jeffotoni/jungle-backend/cmd/api/models"
+	appwager "github.com/jeffotoni/jungle-backend/internal/application/wagering"
+	"github.com/jeffotoni/jungle-backend/internal/contracts"
 	"github.com/jeffotoni/quick"
 )
 

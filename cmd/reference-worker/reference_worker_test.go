@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
 )
 
 func TestReferenceRetryDelay(t *testing.T) {

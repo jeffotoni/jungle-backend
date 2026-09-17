@@ -5,7 +5,7 @@ import (
 
 	"github.com/jeffotoni/log"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/pkg/env"
+	"github.com/jeffotoni/jungle-backend/internal/pkg/env"
 )
 
 var (

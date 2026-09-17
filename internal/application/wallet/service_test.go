@@ -6,9 +6,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend/internal/domain/wager"
 )
 
 type walletTxFake struct{}

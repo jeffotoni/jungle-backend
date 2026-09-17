@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
 )
 
 func (s *Store) InsertLedger(ctx context.Context, tx pgx.Tx, record ports.LedgerRecord) error {

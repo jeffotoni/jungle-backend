@@ -5,9 +5,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	apiauth "github.com/jeffotoni/jungle-backend-challenge/cmd/api/auth"
-	appwager "github.com/jeffotoni/jungle-backend-challenge/internal/application/wagering"
-	appwallet "github.com/jeffotoni/jungle-backend-challenge/internal/application/wallet"
+	apiauth "github.com/jeffotoni/jungle-backend/cmd/api/auth"
+	appwager "github.com/jeffotoni/jungle-backend/internal/application/wagering"
+	appwallet "github.com/jeffotoni/jungle-backend/internal/application/wallet"
 )
 
 type Routes struct {

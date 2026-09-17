@@ -7,10 +7,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/contracts"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
+	"github.com/jeffotoni/jungle-backend/internal/application"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/contracts"
+	"github.com/jeffotoni/jungle-backend/internal/domain/wager"
 )
 
 const testWalletID = "516be6a5-8338-4560-a723-0fc1e6e6e801"

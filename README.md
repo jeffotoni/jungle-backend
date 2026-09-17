@@ -1,4 +1,4 @@
-# Jungle Backend Challenge
+# Jungle Backend
 
 Distributed Go backend for wallet and wagering operations.
 

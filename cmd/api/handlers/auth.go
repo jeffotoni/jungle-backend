@@ -6,7 +6,7 @@ import (
 
 	"github.com/jeffotoni/quick"
 
-	apiauth "github.com/jeffotoni/jungle-backend-challenge/cmd/api/auth"
+	apiauth "github.com/jeffotoni/jungle-backend/cmd/api/auth"
 )
 
 func (r *Routes) requireInternal(c *quick.Ctx) error {

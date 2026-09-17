@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
+	"github.com/jeffotoni/jungle-backend/internal/domain/wager"
 )
 
 var ErrUniqueViolation = errors.New("unique constraint violation")

@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/models"
+	"github.com/jeffotoni/jungle-backend/cmd/api/models"
 	"github.com/jeffotoni/quick"
 )
 

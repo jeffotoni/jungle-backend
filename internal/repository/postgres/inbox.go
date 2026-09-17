@@ -5,7 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
 )
 
 func (s *Store) FindInbox(ctx context.Context, tx pgx.Tx, consumerName, messageID string) (ports.InboxRecord, error) {

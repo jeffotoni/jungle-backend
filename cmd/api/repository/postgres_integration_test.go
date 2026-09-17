@@ -13,10 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	appwager "github.com/jeffotoni/jungle-backend-challenge/internal/application/wagering"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/contracts"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/repository/postgres"
+	appwager "github.com/jeffotoni/jungle-backend/internal/application/wagering"
+	"github.com/jeffotoni/jungle-backend/internal/contracts"
+	"github.com/jeffotoni/jungle-backend/internal/domain/wager"
+	"github.com/jeffotoni/jungle-backend/internal/repository/postgres"
 )
 
 func TestPostgreSQLConcurrentBetsProtectWalletBalance(t *testing.T) {

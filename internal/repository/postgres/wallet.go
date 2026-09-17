@@ -11,7 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
 )
 
 func (s *Store) CreateWallet(ctx context.Context, tx pgx.Tx, record ports.WalletRecord) error {

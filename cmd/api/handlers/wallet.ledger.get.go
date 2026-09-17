@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/models"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	apirepository "github.com/jeffotoni/jungle-backend-challenge/internal/repository/postgres"
+	"github.com/jeffotoni/jungle-backend/cmd/api/models"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	apirepository "github.com/jeffotoni/jungle-backend/internal/repository/postgres"
 	"github.com/jeffotoni/quick"
 )
 

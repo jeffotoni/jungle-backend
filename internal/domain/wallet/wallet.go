@@ -3,7 +3,7 @@ package wallet
 import (
 	"errors"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend/internal/domain/money"
 )
 
 var ErrInvalidWallet = errors.New("invalid wallet")

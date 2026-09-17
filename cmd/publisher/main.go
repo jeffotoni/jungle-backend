@@ -8,9 +8,9 @@ import (
 	"github.com/jeffotoni/log"
 	"go.uber.org/fx"
 
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/publisher/config"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/repository/postgres"
+	"github.com/jeffotoni/jungle-backend/cmd/publisher/config"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/repository/postgres"
 )
 
 func newSQSClient() (*sqs.SQS, error) {

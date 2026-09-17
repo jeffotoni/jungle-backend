@@ -1,4 +1,4 @@
-module github.com/jeffotoni/jungle-backend-challenge
+module github.com/jeffotoni/jungle-backend
 
 go 1.25.0
 

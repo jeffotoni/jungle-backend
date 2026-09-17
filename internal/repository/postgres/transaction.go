@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
 )
 
 type txManager struct {

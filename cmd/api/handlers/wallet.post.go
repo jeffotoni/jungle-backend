@@ -5,8 +5,8 @@ import (
 
 	"github.com/jeffotoni/quick"
 
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/models"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend/cmd/api/models"
+	"github.com/jeffotoni/jungle-backend/internal/domain/money"
 )
 
 func (r *Routes) createWallet(c *quick.Ctx) error {

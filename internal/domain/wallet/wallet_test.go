@@ -3,7 +3,7 @@ package wallet
 import (
 	"testing"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend/internal/domain/money"
 )
 
 func TestNewWallet(t *testing.T) {

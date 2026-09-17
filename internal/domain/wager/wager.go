@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend/internal/domain/money"
 )
 
 var (

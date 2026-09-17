@@ -8,13 +8,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/contracts"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/ledger"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/money"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
-	domainwallet "github.com/jeffotoni/jungle-backend-challenge/internal/domain/wallet"
+	"github.com/jeffotoni/jungle-backend/internal/application"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	"github.com/jeffotoni/jungle-backend/internal/contracts"
+	"github.com/jeffotoni/jungle-backend/internal/domain/ledger"
+	"github.com/jeffotoni/jungle-backend/internal/domain/money"
+	"github.com/jeffotoni/jungle-backend/internal/domain/wager"
+	domainwallet "github.com/jeffotoni/jungle-backend/internal/domain/wallet"
 )
 
 type Service struct {

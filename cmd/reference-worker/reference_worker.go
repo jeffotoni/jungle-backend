@@ -8,10 +8,10 @@ import (
 	"github.com/jeffotoni/log"
 	"go.uber.org/fx"
 
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/reference-worker/config"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	appwager "github.com/jeffotoni/jungle-backend-challenge/internal/application/wagering"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/domain/wager"
+	"github.com/jeffotoni/jungle-backend/cmd/reference-worker/config"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	appwager "github.com/jeffotoni/jungle-backend/internal/application/wagering"
+	"github.com/jeffotoni/jungle-backend/internal/domain/wager"
 )
 
 const pendingReferenceFailureCode = "REFERENCE_NOT_FOUND"

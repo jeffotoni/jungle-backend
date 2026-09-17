@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	apiauth "github.com/jeffotoni/jungle-backend-challenge/cmd/api/auth"
+	apiauth "github.com/jeffotoni/jungle-backend/cmd/api/auth"
 )
 
 func TestLiveEndpoint(t *testing.T) {

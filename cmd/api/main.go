@@ -7,7 +7,7 @@ import (
 
 	"go.uber.org/fx"
 
-	"github.com/jeffotoni/jungle-backend-challenge/internal/fxmodules"
+	"github.com/jeffotoni/jungle-backend/internal/fxmodules"
 )
 
 func main() {

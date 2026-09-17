@@ -12,14 +12,14 @@ import (
 	"github.com/jeffotoni/log"
 	"go.uber.org/fx"
 
-	apiauth "github.com/jeffotoni/jungle-backend-challenge/cmd/api/auth"
-	apiconfig "github.com/jeffotoni/jungle-backend-challenge/cmd/api/config"
-	"github.com/jeffotoni/jungle-backend-challenge/cmd/api/handlers"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/application/ports"
-	appwager "github.com/jeffotoni/jungle-backend-challenge/internal/application/wagering"
-	appwallet "github.com/jeffotoni/jungle-backend-challenge/internal/application/wallet"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/platform/httpserver"
-	"github.com/jeffotoni/jungle-backend-challenge/internal/repository/postgres"
+	apiauth "github.com/jeffotoni/jungle-backend/cmd/api/auth"
+	apiconfig "github.com/jeffotoni/jungle-backend/cmd/api/config"
+	"github.com/jeffotoni/jungle-backend/cmd/api/handlers"
+	"github.com/jeffotoni/jungle-backend/internal/application/ports"
+	appwager "github.com/jeffotoni/jungle-backend/internal/application/wagering"
+	appwallet "github.com/jeffotoni/jungle-backend/internal/application/wallet"
+	"github.com/jeffotoni/jungle-backend/internal/platform/httpserver"
+	"github.com/jeffotoni/jungle-backend/internal/repository/postgres"
 )
 
 var API = fx.Module(
