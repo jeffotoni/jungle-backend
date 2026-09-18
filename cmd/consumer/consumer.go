@@ -95,7 +95,9 @@ func (c *Consumer) run(ctx context.Context) {
 					Msg("message processed").
 					Send()
 			}
-			c.deleteMessage(ctx, message)
+			if err := c.deleteMessage(ctx, message); err != nil {
+				c.logError(ctx, "delete", err, false, aws.StringValue(message.MessageId))
+			}
 		}
 	}
 }
@@ -177,15 +179,14 @@ func (c *Consumer) deleteMessage(ctx context.Context, message *sqs.Message) erro
 		ReceiptHandle: message.ReceiptHandle,
 	})
 	if err != nil {
-		c.logError(ctx, "delete", err, false, "")
-	} else {
-		_ = c.logger.Debug().
-			Component("sqs").
-			Action("delete").
-			Msg("message deleted").
-			Send()
+		return err
 	}
-	return err
+	_ = c.logger.Debug().
+		Component("sqs").
+		Action("delete").
+		Msg("message deleted").
+		Send()
+	return nil
 }
 
 type messageResult struct {

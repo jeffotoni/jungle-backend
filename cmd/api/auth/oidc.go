@@ -183,7 +183,7 @@ func (v *Verifier) get(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("OIDC endpoint returned %d", response.StatusCode)
 	}

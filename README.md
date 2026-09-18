@@ -4,6 +4,53 @@ Distributed Go backend for wallet and wagering operations.
 
 The project is divided into three primary independent services and one dedicated reference worker. Each process has its own responsibility. Shared Application, Domain, contracts, ports and PostgreSQL adapters are kept under `internal/`.
 
+## Technology stack
+
+| Technology | Version / configuration | Purpose |
+| --- | --- | --- |
+| Go | 1.25.0 | Application language and runtime |
+| Docker | Required locally; engine version is provided by the host | Container runtime |
+| Docker Compose | Compose Specification; version is provided by the Docker installation | Local orchestration |
+| PostgreSQL | 16 | Transactional source of truth |
+| Keycloak | 26.3 | OAuth2/OIDC identity provider |
+| LocalStack | 4 | Local AWS SQS implementation |
+| Quick | `fd614be69617` | HTTP server and routing |
+| `github.com/jeffotoni/log` | `4763d2844a46` | Structured JSON logging |
+| Uber Fx | 1.24.0 | Dependency injection and lifecycle |
+| pgx/v5 | 5.11.0 | PostgreSQL driver and connection pool |
+| AWS SDK for Go | 1.55.8 | SQS integration |
+| k6 | Host-installed | HTTP load and performance testing |
+
+The Go version is pinned in `go.mod` and the Docker builder image. PostgreSQL, Keycloak and LocalStack versions are pinned in `docker-compose.yml`. Docker Engine, Docker Compose and k6 are runtime tools installed on the host and are not downloaded by the project.
+
+## Code quality and validation
+
+The root `Makefile` centralizes the development and validation commands. The complete lint pipeline is executed with:
+
+```bash
+make lint
+```
+
+The pipeline includes:
+
+- `gofmt -l .` to detect files that are not formatted;
+- `go vet ./...` for compiler and correctness checks;
+- `golangci-lint run ./...` for static analysis;
+- `gosec ./...` for Go security analysis;
+- `govulncheck ./...` for known vulnerability analysis;
+- `go test ./...` for the complete test suite;
+- `go test -race ./...` for race-condition detection.
+
+The individual Make targets are also available when only one validation step is needed:
+
+```bash
+make test
+make race
+make lint
+```
+
+The project does not treat performance tests as a replacement for correctness validation. The k6 profiles are kept separately under [`k6/README.md`](k6/README.md), while the Go tests and `make lint` validate code quality, security, persistence and concurrency behavior.
+
 ## Primary services and reference worker
 
 ```text

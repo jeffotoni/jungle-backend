@@ -24,6 +24,6 @@ func main() {
 		_ = app.Stop(context.Background())
 		os.Exit(1)
 	}
-	defer app.Stop(context.Background())
+	defer func() { _ = app.Stop(context.Background()) }()
 	<-app.Done()
 }

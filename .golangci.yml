@@ -1,0 +1,9 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # AWS SDK v1 remains until the planned SDK v2 migration.
+      - linters:
+          - staticcheck
+        text: "SA1019"

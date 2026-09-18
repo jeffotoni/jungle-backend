@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 //go:embed index.html api.yaml
@@ -17,8 +18,9 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    addr,
-		Handler: http.FileServer(http.FS(staticFiles)),
+		Addr:              addr,
+		Handler:           http.FileServer(http.FS(staticFiles)),
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	log.Fatal(server.ListenAndServe())

@@ -108,8 +108,8 @@ func newOIDCTestVerifier(t *testing.T, providerID string, roles []string) (*apia
 				"keys": []map[string]string{{
 					"kid": "test-key",
 					"kty": "RSA",
-					"n":   base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
-					"e":   base64.RawURLEncoding.EncodeToString(bigExponent(key.PublicKey.E)),
+					"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+					"e":   base64.RawURLEncoding.EncodeToString(bigExponent(key.E)),
 				}},
 			})
 		default:

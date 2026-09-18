@@ -55,12 +55,8 @@ func Parse(amount, currency string) (Money, error) {
 		return Money{}, ErrInvalidAmount
 	}
 
-	if s[0] == '-' {
-		return Money{}, ErrInvalidAmount
-	} else if s[0] == '+' {
-		return Money{}, ErrInvalidAmount
-	}
-	if s == "" {
+	switch s[0] {
+	case '-', '+':
 		return Money{}, ErrInvalidAmount
 	}
 
