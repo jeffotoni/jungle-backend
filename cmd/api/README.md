@@ -276,9 +276,9 @@ aws --endpoint-url=http://localhost:4566 \
 
 The local Keycloak realm imports the `wallet-internal` and `provider-a` confidential clients from `keycloak/realm-jungle.json`. Their local client secrets are `INTERNAL_CLIENT_SECRET` and `PROVIDER_CLIENT_SECRET`.
 
-### 3. Verify the automated database migrations
+### 3. Confirm the initialized database schema
 
-Docker Compose mounts all migration `up` files into PostgreSQL's `/docker-entrypoint-initdb.d/` directory. The PostgreSQL image executes them in order when the `postgres_data` volume is created:
+When the stack starts with a new `postgres_data` volume, Docker Compose mounts all migration `up` files into PostgreSQL's `/docker-entrypoint-initdb.d/` directory. The PostgreSQL image executes them automatically in order during initialization. The schema is already available before the API calls are executed.
 
 ```text
 000001_init.up.sql
@@ -290,7 +290,30 @@ Docker Compose mounts all migration `up` files into PostgreSQL's `/docker-entryp
 000007_reversal_reference_constraint.up.sql
 ```
 
-There is no need to execute these files manually during the first setup.
+Confirm that the migrations were applied and that the required tables are available:
+
+```bash
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "\dt"
+```
+
+Expected output:
+
+```text
+             List of relations
+ Schema |        Name        | Type  | Owner
+--------+--------------------+-------+--------
+ public | inbox_messages     | table | jungle
+ public | ledger_entries     | table | jungle
+ public | outbox_events      | table | jungle
+ public | wager_transactions | table | jungle
+ public | wallets            | table | jungle
+(5 rows)
+```
+
+No manual migration command is necessary during the first setup or after a clean reset with a new PostgreSQL volume.
 
 If migrations must be applied manually in a controlled database, run every `up` file in lexical order:
 
@@ -313,23 +336,6 @@ done
 ```
 
 Do not run the manual loop against a database that was already initialized by Compose unless the migration state is known. For a clean local recreation, use the reset procedure at the end of this document.
-
-Confirm that the required tables exist:
-
-```bash
-docker compose exec -T postgres psql \
-  -U jungle \
-  -d jungle \
-  -c "\dt"
-```
-
-The following tables should appear:
-
-- `wallets`
-- `wager_transactions`
-- `ledger_entries`
-- `inbox_messages`
-- `outbox_events`
 
 ### 4. Validate the API and supporting processes
 
@@ -390,6 +396,8 @@ export PROVIDER_TOKEN="$(curl -fsS -X POST "$KEYCLOAK_TOKEN_URL" \
   | jq -r '.access_token')"
 ```
 
+The local Keycloak tokens are valid for approximately 5 minutes (`expires_in=300`). Generate a new token when it expires or when the API returns `401 Unauthorized`.
+
 The internal token contains the `wallet-internal` role. The provider token has provider identity `provider-a`, so wagering requests must use `"providerId": "provider-a"`.
 
 ### 7. Run the first API smoke test
@@ -419,7 +427,7 @@ The examples below assume that the bearer tokens were issued by the configured O
 ```bash
 export WALLET_PLAYER_ID="player-$(date +%s)"
 
-curl -i -sS -X POST "$API/wallets" \
+WALLET_RESPONSE="$(curl -fsS -X POST "$API/wallets" \
   -H "Authorization: Bearer $INTERNAL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -428,13 +436,17 @@ curl -i -sS -X POST "$API/wallets" \
       "amount": "25.00",
       "currency": "BRL"
     }
-  }'
+  }')"
+
+echo "$WALLET_RESPONSE" | jq .
 ```
 
-Save the `id` returned by this request:
+The expected HTTP response is `201 Created`. Extract the returned wallet identifier instead of typing an old UUID manually:
 
 ```bash
-export WALLET_ID="<wallet-id-from-response>"
+export WALLET_ID="$(echo "$WALLET_RESPONSE" | jq -r '.id')"
+
+test -n "$WALLET_ID" && test "$WALLET_ID" != "null" && echo "wallet created: $WALLET_ID"
 echo "$WALLET_ID"
 ```
 
@@ -773,13 +785,21 @@ curl -i -sS -X GET "$API/wallets/$WALLET_ID/ledger?limit=50" \
 Use the `nextCursor` returned by the response for the next page:
 
 ```bash
-export LEDGER_CURSOR="<next-cursor-from-response>"
+LEDGER_PAGE="$(curl -fsS -X GET "$API/wallets/$WALLET_ID/ledger?limit=2" \
+  -H "Authorization: Bearer $INTERNAL_TOKEN")"
 
-curl -i -sS -X GET "$API/wallets/$WALLET_ID/ledger?cursor=$LEDGER_CURSOR&limit=50" \
-  -H "Authorization: Bearer $INTERNAL_TOKEN"
+echo "$LEDGER_PAGE" | jq .
+export LEDGER_CURSOR="$(echo "$LEDGER_PAGE" | jq -r '.nextCursor')"
+
+if [ -n "$LEDGER_CURSOR" ] && [ "$LEDGER_CURSOR" != "null" ]; then
+  curl -i -sS -X GET "$API/wallets/$WALLET_ID/ledger?cursor=$LEDGER_CURSOR&limit=50" \
+    -H "Authorization: Bearer $INTERNAL_TOKEN"
+else
+  echo "No next page"
+fi
 ```
 
-An invalid cursor returns `400 Bad Request` with `INVALID_REQUEST`.
+If the response does not contain `nextCursor`, there is no next page. In the example above with `limit=50`, all five entries were returned, so no cursor is required. An invalid cursor returns `400 Bad Request` with `INVALID_REQUEST`.
 
 ### Get a wagering transaction
 
