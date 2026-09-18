@@ -233,22 +233,30 @@ All business endpoints require a bearer token. Internal wallet and reconciliatio
 
 ## First-time local setup
 
-Run these commands from the repository root.
+Run these commands from the repository root. Docker Compose is the recommended way to start the API with its required infrastructure.
 
-### 1. Start PostgreSQL, Keycloak and LocalStack
+### 1. Start the complete local stack
 
 ```bash
-docker compose up -d
+docker compose up -d --build postgres keycloak localstack api consumer publisher reference-worker swagger
 docker compose ps
 ```
 
-Wait for the dependencies to become available:
+Validate PostgreSQL first:
 
 ```bash
 until docker compose exec -T postgres pg_isready -U jungle -d jungle; do
   sleep 2
 done
+```
 
+The PostgreSQL container is ready when its status contains `Up (healthy)`.
+
+### 2. Validate Keycloak and LocalStack
+
+Wait for Keycloak and LocalStack to become available:
+
+```bash
 until curl -fsS http://localhost:8081/realms/jungle/.well-known/openid-configuration >/dev/null; do
   sleep 2
 done
@@ -258,23 +266,53 @@ until curl -fsS http://localhost:4566/_localstack/health >/dev/null; do
 done
 ```
 
-The local Keycloak realm imports the `wallet-internal` and `provider-a` confidential clients from `keycloak/realm-jungle.json`. The imported client secrets are `INTERNAL_CLIENT_SECRET` and `PROVIDER_CLIENT_SECRET`.
-
-### 2. Apply the database migrations
-
-Apply the migrations in order before using the financial endpoints:
+Confirm that LocalStack created the queues:
 
 ```bash
-docker compose exec -T postgres psql \
-  -U jungle \
-  -d jungle \
-  < migrations/000001_init.up.sql
-
-docker compose exec -T postgres psql \
-  -U jungle \
-  -d jungle \
-  < migrations/000002_api_financial_guarantees.up.sql
+aws --endpoint-url=http://localhost:4566 \
+  sqs list-queues \
+  --output table
 ```
+
+The local Keycloak realm imports the `wallet-internal` and `provider-a` confidential clients from `keycloak/realm-jungle.json`. Their local client secrets are `INTERNAL_CLIENT_SECRET` and `PROVIDER_CLIENT_SECRET`.
+
+### 3. Verify the automated database migrations
+
+Docker Compose mounts all migration `up` files into PostgreSQL's `/docker-entrypoint-initdb.d/` directory. The PostgreSQL image executes them in order when the `postgres_data` volume is created:
+
+```text
+000001_init.up.sql
+000002_api_financial_guarantees.up.sql
+000003_inbox_consumer_identity.up.sql
+000004_outbox_claim_lease.up.sql
+000005_pending_reference_retry.up.sql
+000006_financial_constraints.up.sql
+000007_reversal_reference_constraint.up.sql
+```
+
+There is no need to execute these files manually during the first setup.
+
+If migrations must be applied manually in a controlled database, run every `up` file in lexical order:
+
+```bash
+for migration in \
+  migrations/000001_init.up.sql \
+  migrations/000002_api_financial_guarantees.up.sql \
+  migrations/000003_inbox_consumer_identity.up.sql \
+  migrations/000004_outbox_claim_lease.up.sql \
+  migrations/000005_pending_reference_retry.up.sql \
+  migrations/000006_financial_constraints.up.sql \
+  migrations/000007_reversal_reference_constraint.up.sql; do
+  echo "Applying $migration"
+  docker compose exec -T postgres psql \
+    -v ON_ERROR_STOP=1 \
+    -U jungle \
+    -d jungle \
+    < "$migration"
+done
+```
+
+Do not run the manual loop against a database that was already initialized by Compose unless the migration state is known. For a clean local recreation, use the reset procedure at the end of this document.
 
 Confirm that the required tables exist:
 
@@ -293,43 +331,50 @@ The following tables should appear:
 - `inbox_messages`
 - `outbox_events`
 
-### 3. Configure the API environment
-
-Use the following variables in the terminal where the API will run:
+### 4. Validate the API and supporting processes
 
 ```bash
-export API=http://localhost:8080
-export HTTP_ADDR=:8080
-export DATABASE_URL="postgres://jungle:jungle@localhost:5432/jungle?sslmode=disable"
-export OIDC_ISSUER=http://localhost:8081/realms/jungle
-export OIDC_AUDIENCE=jungle-api
-export OIDC_INTERNAL_ROLE=wallet-internal
-export TRACE_ID=traceId
-export LOG_LEVEL=DEBUG
+docker compose ps
+curl -i http://localhost:8080/health/live
+curl -i http://localhost:8080/health/ready
+curl -I http://localhost:8082/
 ```
 
-### 4. Start the API
+The API is exposed on `http://localhost:8080`. Swagger is exposed on `http://localhost:8082`. Consumer, Publisher and Reference Worker run as background processes without HTTP ports.
 
-In Terminal 1:
+Expected API responses are `200 OK` with `{"status":"ok"}` for liveness and `{"status":"ready"}` for readiness. Readiness verifies PostgreSQL and the SQS wagering queue.
 
-```bash
-go run ./cmd/api
-```
+### 5. Configure the API environment
 
-### 5. Obtain Keycloak tokens
-
-Install `jq` and run this block in Terminal 2. Shell exports are local to each terminal:
+Use these variables in the terminal where the manual curl commands will run:
 
 ```bash
-export API=http://localhost:8080
-export OIDC_ISSUER=http://localhost:8081/realms/jungle
-export OIDC_AUDIENCE=jungle-api
+export API="http://localhost:8080"
+export OIDC_ISSUER="http://localhost:8081/realms/jungle"
 export KEYCLOAK_TOKEN_URL="$OIDC_ISSUER/protocol/openid-connect/token"
-export INTERNAL_CLIENT_ID=wallet-internal
-export INTERNAL_CLIENT_SECRET=INTERNAL_CLIENT_SECRET
-export PROVIDER_CLIENT_ID=provider-a
-export PROVIDER_CLIENT_SECRET=PROVIDER_CLIENT_SECRET
 
+export INTERNAL_CLIENT_ID="wallet-internal"
+export INTERNAL_CLIENT_SECRET="INTERNAL_CLIENT_SECRET"
+export PROVIDER_CLIENT_ID="provider-a"
+export PROVIDER_CLIENT_SECRET="PROVIDER_CLIENT_SECRET"
+```
+
+When running the API directly with `go run ./cmd/api`, also configure:
+
+```bash
+export HTTP_ADDR=":8080"
+export DATABASE_URL="postgres://jungle:jungle@localhost:5432/jungle?sslmode=disable"
+export OIDC_AUDIENCE="jungle-api"
+export OIDC_INTERNAL_ROLE="wallet-internal"
+export TRACE_ID="traceId"
+export LOG_LEVEL="DEBUG"
+```
+
+### 6. Obtain Keycloak tokens
+
+Install `jq` and run these commands in the same terminal:
+
+```bash
 export INTERNAL_TOKEN="$(curl -fsS -X POST "$KEYCLOAK_TOKEN_URL" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "grant_type=client_credentials" \
@@ -347,7 +392,7 @@ export PROVIDER_TOKEN="$(curl -fsS -X POST "$KEYCLOAK_TOKEN_URL" \
 
 The internal token contains the `wallet-internal` role. The provider token has provider identity `provider-a`, so wagering requests must use `"providerId": "provider-a"`.
 
-### 6. Run the first API smoke test
+### 7. Run the first API smoke test
 
 ```bash
 curl -i "$API/health/live"
@@ -358,16 +403,27 @@ After the health checks succeed, use the authenticated examples below.
 
 ## POST examples
 
-The examples below assume that the bearer tokens were issued by the configured OIDC provider and `WALLET_ID` refers to an existing wallet.
+The examples below assume that the bearer tokens were issued by the configured OIDC provider. Run them in the order shown so that each later request can use identifiers returned by the previous request.
+
+| Operation | Success | Typical business response |
+| --- | --- | --- |
+| Create wallet | `201 Created` | New wallet and opening balance |
+| BET, WIN, LOSS, REFUND, ROLLBACK | `200 OK` | Processed transaction |
+| Wager without a resolvable reference | `202 Accepted` | `PENDING_REFERENCE` |
+| Rejected wager | `422 Unprocessable Entity` | `REJECTED` with `failureCode` |
+| Idempotency conflict | `409 Conflict` | No financial mutation |
+| Reconciliation | `200 OK` | Wallet versus ledger comparison |
 
 ### Create a wallet
 
 ```bash
-curl -X POST "$API/wallets" \
+export WALLET_PLAYER_ID="player-$(date +%s)"
+
+curl -i -sS -X POST "$API/wallets" \
   -H "Authorization: Bearer $INTERNAL_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "playerId": "player-001",
+    "playerId": "'"$WALLET_PLAYER_ID"'",
     "initialBalance": {
       "amount": "25.00",
       "currency": "BRL"
@@ -378,24 +434,72 @@ curl -X POST "$API/wallets" \
 Save the `id` returned by this request:
 
 ```bash
-export WALLET_ID="516be6a5-8338-4560-a723-0fc1e6e6e801"
+export WALLET_ID="<wallet-id-from-response>"
 echo "$WALLET_ID"
 ```
 
-When a different wallet is created, replace the value with the `id` returned by the API.
+Resolve and export the wallet's player identifier for the wagering payloads:
+
+```bash
+export PLAYER_ID="$(docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -At \
+  -c "SELECT player_id FROM wallets WHERE id = '$WALLET_ID';")"
+
+echo "WALLET_ID=$WALLET_ID"
+echo "PLAYER_ID=$PLAYER_ID"
+
+export RUN_ID="$(date +%s)"
+export BET_EXTERNAL_ID="bet-ext-$RUN_ID"
+export BET_IDEMPOTENCY_KEY="bet-key-$RUN_ID"
+export WIN_EXTERNAL_ID="win-ext-$RUN_ID"
+export WIN_IDEMPOTENCY_KEY="win-key-$RUN_ID"
+export LOSS_EXTERNAL_ID="loss-ext-$RUN_ID"
+export LOSS_IDEMPOTENCY_KEY="loss-key-$RUN_ID"
+export REFUND_EXTERNAL_ID="refund-ext-$RUN_ID"
+export REFUND_IDEMPOTENCY_KEY="refund-key-$RUN_ID"
+export ROLLBACK_EXTERNAL_ID="rollback-ext-$RUN_ID"
+export ROLLBACK_IDEMPOTENCY_KEY="rollback-key-$RUN_ID"
+```
+
+The wallet is created with balance `25.00 BRL`, version `1`, an `OPENING` transaction, a `CREDIT` ledger entry and the corresponding outbox events.
+
+Confirm the wallet and its opening operation in PostgreSQL:
+
+```bash
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT id, player_id, balance, currency, version FROM wallets WHERE id = '$WALLET_ID';"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT kind, status, amount, result_balance FROM wager_transactions WHERE wallet_id = '$WALLET_ID' ORDER BY created_at;"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT direction, amount, balance_before, balance_after FROM ledger_entries WHERE wallet_id = '$WALLET_ID' ORDER BY created_at;"
+```
+
+The initial wallet should have balance `2500`, version `1`, an `OPENING` transaction and one `CREDIT` ledger entry. PostgreSQL stores money in minor units.
+
+Creating the same `(playerId, currency)` again returns `409 Conflict` and does not create another wallet, ledger entry or outbox event.
 
 ### Process a BET
 
 ```bash
-curl -X POST "$API/wagering/transactions" \
+curl -i -sS -X POST "$API/wagering/transactions" \
   -H "Authorization: Bearer $PROVIDER_TOKEN" \
-  -H "Idempotency-Key: bet-001" \
+  -H "Idempotency-Key: $BET_IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "providerId": "provider-a",
-    "externalTransactionId": "bet-ext-001",
+    "externalTransactionId": "'"$BET_EXTERNAL_ID"'",
     "walletId": "'$WALLET_ID'",
-    "playerId": "player-001",
+    "playerId": "'"$PLAYER_ID"'",
     "roundId": "round-001",
     "gameId": "game-001",
     "kind": "BET",
@@ -406,18 +510,117 @@ curl -X POST "$API/wagering/transactions" \
   }'
 ```
 
-### Process a WIN
+Expected result: `200 OK`, status `PROCESSED` and balance `15.00 BRL`. Save the returned `transactionId` as `BET_TRANSACTION_ID` if you want to inspect it directly.
+
+Confirm the financial write immediately after the BET:
 
 ```bash
-curl -X POST "$API/wagering/transactions" \
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT id, external_transaction_id, idempotency_key, status, amount, result_balance FROM wager_transactions WHERE external_transaction_id = '$BET_EXTERNAL_ID';"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT direction, amount, balance_before, balance_after FROM ledger_entries WHERE wallet_id = '$WALLET_ID' ORDER BY created_at;"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT event_type, status, attempts, published_at FROM outbox_events WHERE aggregate_id = '$WALLET_ID' ORDER BY created_at;"
+```
+
+The BET should be `PROCESSED`, the wallet balance should be `1500`, and one `DEBIT` ledger entry should show `2500 -> 1500`. An outbox event may first appear as `PENDING`; after the Publisher processes it, the same event becomes `PUBLISHED` and receives `published_at`.
+
+Observe the Publisher and output queue:
+
+```bash
+docker compose logs --tail=30 --no-color publisher
+
+aws --endpoint-url=http://localhost:4566 \
+  sqs get-queue-attributes \
+  --queue-url "http://localhost:4566/000000000000/jungle-events" \
+  --attribute-names ApproximateNumberOfMessages \
+  --output table
+```
+
+Repeat the outbox query above after the Publisher log reports publication. `PUBLISHED` confirms that the event was published after the PostgreSQL commit.
+
+The same request can be replayed safely:
+
+```bash
+curl -i -sS -X POST "$API/wagering/transactions" \
   -H "Authorization: Bearer $PROVIDER_TOKEN" \
-  -H "Idempotency-Key: win-001" \
+  -H "Idempotency-Key: $BET_IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "providerId": "provider-a",
-    "externalTransactionId": "win-ext-001",
+    "externalTransactionId": "'"$BET_EXTERNAL_ID"'",
     "walletId": "'$WALLET_ID'",
-    "playerId": "player-001",
+    "playerId": "'"$PLAYER_ID"'",
+    "roundId": "round-001",
+    "gameId": "game-001",
+    "kind": "BET",
+    "money": {
+      "amount": "10.00",
+      "currency": "BRL"
+    }
+  }'
+```
+
+The replay returns the original result with `idempotentReplay: true`; the balance and ledger are not changed a second time. Reusing the same key with a different payload returns `409 Conflict`.
+
+Confirm that replay did not create another financial transaction or ledger entry:
+
+```bash
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT COUNT(*) AS wager_count FROM wager_transactions WHERE idempotency_key = '$BET_IDEMPOTENCY_KEY';"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT COUNT(*) AS debit_count FROM ledger_entries WHERE wallet_id = '$WALLET_ID' AND direction = 'DEBIT' AND amount = 1000;"
+```
+
+Both counts should remain `1`. To verify an idempotency conflict, keep the same key but change the payload amount:
+
+```bash
+curl -i -sS -X POST "$API/wagering/transactions" \
+  -H "Authorization: Bearer $PROVIDER_TOKEN" \
+  -H "Idempotency-Key: $BET_IDEMPOTENCY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerId": "provider-a",
+    "externalTransactionId": "'"$BET_EXTERNAL_ID"'",
+    "walletId": "'$WALLET_ID'",
+    "playerId": "'"$PLAYER_ID"'",
+    "roundId": "round-001",
+    "gameId": "game-001",
+    "kind": "BET",
+    "money": {
+      "amount": "11.00",
+      "currency": "BRL"
+    }
+  }'
+```
+
+Expected result: `409 Conflict`, with no wallet, wager or ledger mutation.
+
+### Process a WIN
+
+```bash
+curl -i -sS -X POST "$API/wagering/transactions" \
+  -H "Authorization: Bearer $PROVIDER_TOKEN" \
+  -H "Idempotency-Key: $WIN_IDEMPOTENCY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "providerId": "provider-a",
+    "externalTransactionId": "'"$WIN_EXTERNAL_ID"'",
+    "walletId": "'$WALLET_ID'",
+    "playerId": "'"$PLAYER_ID"'",
     "roundId": "round-001",
     "gameId": "game-001",
     "kind": "WIN",
@@ -428,20 +631,22 @@ curl -X POST "$API/wagering/transactions" \
   }'
 ```
 
+Expected result: `200 OK`, status `PROCESSED` and balance `35.00 BRL`.
+
 ### Process a LOSS
 
 `LOSS` requires the amount `"0.00"` and does not change the balance or create a ledger entry.
 
 ```bash
-curl -X POST "$API/wagering/transactions" \
+curl -i -sS -X POST "$API/wagering/transactions" \
   -H "Authorization: Bearer $PROVIDER_TOKEN" \
-  -H "Idempotency-Key: loss-001" \
+  -H "Idempotency-Key: $LOSS_IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "providerId": "provider-a",
-    "externalTransactionId": "loss-ext-001",
+    "externalTransactionId": "'"$LOSS_EXTERNAL_ID"'",
     "walletId": "'$WALLET_ID'",
-    "playerId": "player-001",
+    "playerId": "'"$PLAYER_ID"'",
     "roundId": "round-001",
     "gameId": "game-001",
     "kind": "LOSS",
@@ -452,20 +657,22 @@ curl -X POST "$API/wagering/transactions" \
   }'
 ```
 
+Expected result: `200 OK`, status `PROCESSED`, with no balance change and no new ledger entry.
+
 ### Process a REFUND
 
 `REFUND` references the original processed BET and credits its full amount.
 
 ```bash
-curl -X POST "$API/wagering/transactions" \
+curl -i -sS -X POST "$API/wagering/transactions" \
   -H "Authorization: Bearer $PROVIDER_TOKEN" \
-  -H "Idempotency-Key: refund-001" \
+  -H "Idempotency-Key: $REFUND_IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "providerId": "provider-a",
-    "externalTransactionId": "refund-ext-001",
+    "externalTransactionId": "'"$REFUND_EXTERNAL_ID"'",
     "walletId": "'$WALLET_ID'",
-    "playerId": "player-001",
+    "playerId": "'"$PLAYER_ID"'",
     "roundId": "round-001",
     "gameId": "game-001",
     "kind": "REFUND",
@@ -473,24 +680,26 @@ curl -X POST "$API/wagering/transactions" \
       "amount": "10.00",
       "currency": "BRL"
     },
-    "referenceExternalTransactionId": "bet-ext-001"
+    "referenceExternalTransactionId": "'"$BET_EXTERNAL_ID"'"
   }'
 ```
+
+Expected result: `200 OK`, status `PROCESSED`, with the full BET amount credited back to the wallet.
 
 ### Process a ROLLBACK
 
 `ROLLBACK` applies the inverse effect of a processed BET, WIN or REFUND and requires its reference.
 
 ```bash
-curl -X POST "$API/wagering/transactions" \
+curl -i -sS -X POST "$API/wagering/transactions" \
   -H "Authorization: Bearer $PROVIDER_TOKEN" \
-  -H "Idempotency-Key: rollback-001" \
+  -H "Idempotency-Key: $ROLLBACK_IDEMPOTENCY_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "providerId": "provider-a",
-    "externalTransactionId": "rollback-ext-001",
+    "externalTransactionId": "'"$ROLLBACK_EXTERNAL_ID"'",
     "walletId": "'$WALLET_ID'",
-    "playerId": "player-001",
+    "playerId": "'"$PLAYER_ID"'",
     "roundId": "round-001",
     "gameId": "game-001",
     "kind": "ROLLBACK",
@@ -498,16 +707,48 @@ curl -X POST "$API/wagering/transactions" \
       "amount": "20.00",
       "currency": "BRL"
     },
-    "referenceExternalTransactionId": "win-ext-001"
+    "referenceExternalTransactionId": "'"$WIN_EXTERNAL_ID"'"
   }'
 ```
+
+Expected result: `200 OK`, status `PROCESSED`, with the inverse of the referenced WIN applied to the wallet.
+
+Inspect the complete financial history after WIN, LOSS, REFUND and ROLLBACK:
+
+```bash
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT external_transaction_id, kind, status, amount, result_balance, failure_code FROM wager_transactions WHERE wallet_id = '$WALLET_ID' ORDER BY created_at;"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT direction, amount, balance_before, balance_after, wager_transaction_id FROM ledger_entries WHERE wallet_id = '$WALLET_ID' ORDER BY created_at;"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT event_type, status, attempts, published_at FROM outbox_events WHERE aggregate_id = '$WALLET_ID' ORDER BY created_at;"
+```
+
+Expected financial behavior:
+
+- `WIN` creates a `CREDIT` ledger entry and increases the balance.
+- `LOSS` remains a successful transaction with amount `0`, but does not create a ledger entry or `WalletBalanceChanged` event.
+- `REFUND` creates a full credit for the referenced BET.
+- `ROLLBACK` creates the inverse effect of its referenced operation.
+- `REJECTED` rows preserve `failure_code` and do not create a financial ledger effect.
+- Outbox rows move from `PENDING` to `PUBLISHED` after the Publisher succeeds.
 
 ### Reconcile a wallet
 
 ```bash
-curl -X POST "$API/wallets/$WALLET_ID/reconciliation" \
+curl -i -sS -X POST "$API/wallets/$WALLET_ID/reconciliation" \
   -H "Authorization: Bearer $INTERNAL_TOKEN"
 ```
+
+The response contains `storedBalance`, `calculatedBalance`, `difference`, `consistent` and `checkedEntries`. Reconciliation does not modify the wallet.
 
 Repeating a wagering request with the same `Idempotency-Key` and the same canonical payload returns the original result. Reusing the key with a different payload is a conflict. A different key cannot reapply the same provider/external transaction identity.
 
@@ -516,23 +757,29 @@ Repeating a wagering request with the same `Idempotency-Key` and the same canoni
 ### Get a wallet
 
 ```bash
-curl -X GET "$API/wallets/$WALLET_ID" \
+curl -i -sS -X GET "$API/wallets/$WALLET_ID" \
   -H "Authorization: Bearer $INTERNAL_TOKEN"
 ```
+
+Expected result: `200 OK` with the current balance and wallet version.
 
 ### Get wallet ledger
 
 ```bash
-curl -X GET "$API/wallets/$WALLET_ID/ledger?limit=50" \
+curl -i -sS -X GET "$API/wallets/$WALLET_ID/ledger?limit=50" \
   -H "Authorization: Bearer $INTERNAL_TOKEN"
 ```
 
 Use the `nextCursor` returned by the response for the next page:
 
 ```bash
-curl -X GET "$API/wallets/$WALLET_ID/ledger?cursor=<next-cursor>&limit=50" \
+export LEDGER_CURSOR="<next-cursor-from-response>"
+
+curl -i -sS -X GET "$API/wallets/$WALLET_ID/ledger?cursor=$LEDGER_CURSOR&limit=50" \
   -H "Authorization: Bearer $INTERNAL_TOKEN"
 ```
+
+An invalid cursor returns `400 Bad Request` with `INVALID_REQUEST`.
 
 ### Get a wagering transaction
 
@@ -541,16 +788,74 @@ Set `TRANSACTION_ID` to the `transactionId` returned by a wagering request:
 ```bash
 export TRANSACTION_ID="<transaction-id-from-response>"
 
-curl -X GET "$API/wagering/transactions/$TRANSACTION_ID" \
+curl -i -sS -X GET "$API/wagering/transactions/$TRANSACTION_ID" \
   -H "Authorization: Bearer $PROVIDER_TOKEN"
 ```
 
 ### Get a transaction by provider and external ID
 
 ```bash
-curl -X GET "$API/providers/provider-a/wagering/transactions/bet-ext-001" \
+curl -i -sS -X GET "$API/providers/provider-a/wagering/transactions/$BET_EXTERNAL_ID" \
   -H "Authorization: Bearer $PROVIDER_TOKEN"
 ```
+
+Expected result for both transaction queries: `200 OK` with the persisted transaction result.
+
+## Authentication and validation checks
+
+These requests are useful for confirming that authentication, authorization, provider isolation and transport validation are active:
+
+```bash
+# Missing bearer token.
+curl -i -sS -X POST "$API/wallets" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# Expected: 401 UNAUTHORIZED.
+
+# Provider token cannot create internal wallets.
+curl -i -sS -X POST "$API/wallets" \
+  -H "Authorization: Bearer $PROVIDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# Expected: 403 FORBIDDEN.
+
+# Wagering requires Idempotency-Key.
+curl -i -sS -X POST "$API/wagering/transactions" \
+  -H "Authorization: Bearer $PROVIDER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+# Expected: 400 INVALID_REQUEST.
+```
+
+Provider isolation can be checked by changing `providerId` to a provider different from the identity in `PROVIDER_TOKEN`; the response must be `403 FORBIDDEN`.
+
+## Verify persisted API state
+
+After the wallet and wagering requests, inspect the records created by the API:
+
+```bash
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT id, player_id, balance, currency, version FROM wallets WHERE id = '$WALLET_ID';"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT id, provider_id, external_transaction_id, idempotency_key, status, amount FROM wager_transactions WHERE wallet_id = '$WALLET_ID' ORDER BY created_at;"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT direction, amount, balance_before, balance_after FROM ledger_entries WHERE wallet_id = '$WALLET_ID' ORDER BY created_at;"
+
+docker compose exec -T postgres psql \
+  -U jungle \
+  -d jungle \
+  -c "SELECT event_type, status, published_at FROM outbox_events WHERE aggregate_id = '$WALLET_ID' ORDER BY created_at;"
+```
+
+The wallet balance and ledger must agree. `LOSS` does not create a ledger entry, and events are marked `PUBLISHED` after the Publisher sends them to the output queue.
 
 ### Health checks
 
@@ -591,35 +896,28 @@ The Consumer and Publisher are independent processes. The Consumer will process 
 
 ## Reset local PostgreSQL
 
-Use this procedure when the local PostgreSQL database must be completely cleared and recreated. It removes the `postgres_data` Docker volume and all data stored in it.
+Use this procedure when the complete local environment must be cleared and recreated. It removes the `postgres_data` Docker volume and all data stored in it.
 
 ```bash
-docker compose down -v
-docker compose up -d postgres
-```
+docker compose down -v --remove-orphans
+docker compose up -d --build postgres keycloak localstack api consumer publisher reference-worker swagger
 
-Wait for PostgreSQL and apply the migrations again:
-
-```bash
 until docker compose exec -T postgres pg_isready -U jungle -d jungle; do
   sleep 2
 done
 
-docker compose exec -T postgres psql \
-  -U jungle \
-  -d jungle \
-  < migrations/000001_init.up.sql
+until curl -fsS http://localhost:8081/realms/jungle/.well-known/openid-configuration >/dev/null; do
+  sleep 2
+done
 
-docker compose exec -T postgres psql \
-  -U jungle \
-  -d jungle \
-  < migrations/000002_api_financial_guarantees.up.sql
+until curl -fsS http://localhost:4566/_localstack/health >/dev/null; do
+  sleep 2
+done
+
+docker compose ps
+aws --endpoint-url=http://localhost:4566 sqs list-queues --output table
+curl -i http://localhost:8080/health/live
+curl -i http://localhost:8080/health/ready
 ```
 
-Start Keycloak and LocalStack again if they are not running:
-
-```bash
-docker compose up -d keycloak localstack
-```
-
-Then repeat the environment setup, API startup and token commands from the first-time setup above.
+The migrations run automatically again because the PostgreSQL volume is new. Repeat the token generation and curl sequence from this README after the services become healthy.

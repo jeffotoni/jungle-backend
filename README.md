@@ -23,6 +23,195 @@ The project is divided into three primary independent services and one dedicated
 
 The Go version is pinned in `go.mod` and the Docker builder image. PostgreSQL, Keycloak and LocalStack versions are pinned in `docker-compose.yml`. Docker Engine, Docker Compose and k6 are runtime tools installed on the host and are not downloaded by the project.
 
+## Project structure
+
+The repository separates independently deployable processes from code shared by the API, Consumer, Publisher and reference worker:
+
+```text
+.
+├── cmd/
+│   ├── api/
+│   │   ├── auth/
+│   │   ├── config/
+│   │   ├── handlers/
+│   │   ├── models/
+│   │   └── repository/
+│   ├── consumer/
+│   │   └── config/
+│   ├── publisher/
+│   │   └── config/
+│   ├── reference-worker/
+│   │   └── config/
+│   └── swagger/
+├── internal/
+│   ├── application/
+│   │   ├── ports/
+│   │   ├── wagering/
+│   │   └── wallet/
+│   ├── contracts/
+│   ├── domain/
+│   │   ├── ledger/
+│   │   ├── money/
+│   │   ├── wager/
+│   │   └── wallet/
+│   ├── fxmodules/
+│   ├── pkg/
+│   │   └── env/
+│   ├── platform/
+│   │   └── httpserver/
+│   └── repository/
+│       └── postgres/
+├── k6/
+│   ├── profiles/
+│   └── scenarios/
+├── keycloak/
+├── migrations/
+├── postman/
+└── scripts/
+```
+
+### Directory responsibilities
+
+#### Deployable processes
+
+- `cmd/`: executable processes and their process-specific configuration.
+- `cmd/api/`: authenticated HTTP service. Its handlers, HTTP models and API-only repository concerns stay at the service boundary.
+- `cmd/consumer/`: SQS FIFO consumer that receives wagering requests and invokes shared application use cases.
+- `cmd/publisher/`: transactional outbox publisher that sends committed events to SQS.
+- `cmd/reference-worker/`: worker that retries and expires pending `REFUND` and `ROLLBACK` references.
+- `cmd/swagger/`: standalone service for the embedded API documentation.
+
+#### Shared application architecture
+
+- `internal/application/`: shared use cases and application ports used by API, Consumer and workers.
+- `internal/contracts/`: shared HTTP/SQS/event contracts, normalization and canonical hashing.
+- `internal/domain/`: business entities and financial invariants, independent of transports and infrastructure.
+- `internal/fxmodules/`: Uber Fx dependency-injection modules and process composition.
+- `internal/pkg/env/`: shared environment-variable helpers.
+- `internal/platform/`: shared technical platform components, including HTTP server lifecycle support.
+- `internal/repository/postgres/`: shared PostgreSQL connection, transaction and persistence adapters.
+
+#### Infrastructure and configuration
+
+- `keycloak/`: local realm and identity-provider configuration for OAuth2/OIDC.
+- `migrations/`: reversible PostgreSQL schema migrations loaded by the local Compose stack.
+
+#### Testing and developer tools
+
+- `k6/`: HTTP performance tests, separated from correctness and integration tests.
+- `postman/`: API request collection for manual HTTP validation.
+- `scripts/`: local-stack initialization, SQS message generation and acceptance-test helpers.
+
+The `internal/` tree contains only components that can be shared across deployables. HTTP-specific models and handlers remain under `cmd/api`, while SQS, outbox and worker responsibilities remain isolated in their respective processes.
+
+## First startup with Docker Compose
+
+Docker Compose is the recommended way to run the complete local stack. It starts PostgreSQL, Keycloak, LocalStack/SQS and all application processes on the same Docker network.
+
+### Start the local stack
+
+Run these commands from the repository root:
+
+```bash
+docker compose up -d postgres
+docker compose ps postgres
+
+docker compose up -d keycloak localstack
+docker compose ps keycloak localstack
+
+docker compose up -d --build api consumer publisher reference-worker swagger
+docker compose ps
+```
+
+On the first PostgreSQL startup, Docker Compose mounts all migration `up` files into `/docker-entrypoint-initdb.d/`. The PostgreSQL image executes them in order while creating the `postgres_data` volume. The complete schema is therefore initialized automatically; there is no separate migration container in the local stack.
+
+The expected local services are:
+
+| Service | Status | Access |
+| --- | --- | --- |
+| PostgreSQL | ✅ healthy | `localhost:5432` |
+| Keycloak | ✅ running | `http://localhost:8081` |
+| LocalStack/SQS | ✅ healthy | `http://localhost:4566` |
+| API | ✅ running | `http://localhost:8080` |
+| Consumer | ✅ running | internal worker |
+| Publisher | ✅ running | internal worker |
+| Reference worker | ✅ running | internal worker |
+| Swagger | ✅ running | `http://localhost:8082` |
+
+Check the application endpoints after startup:
+
+```bash
+curl -i http://localhost:8080/health/live
+curl -i http://localhost:8080/health/ready
+curl -I http://localhost:8082/
+```
+
+The expected Compose status is equivalent to:
+
+```text
+NAME                         SERVICE            STATUS                   PORTS
+jungle-backend-api-1        api                Up                       0.0.0.0:8080->8080/tcp
+jungle-backend-consumer-1   consumer           Up
+jungle-backend-publisher-1  publisher          Up
+jungle-backend-reference-1  reference-worker   Up
+jungle-backend-swagger-1    swagger            Up                       0.0.0.0:8082->8080/tcp
+jungle-backend-postgres-1   postgres            Up (healthy)             0.0.0.0:5432->5432/tcp
+jungle-backend-keycloak-1   keycloak            Up                       0.0.0.0:8081->8080/tcp
+jungle-backend-localstack-1 localstack          Up (healthy)             0.0.0.0:4566->4566/tcp
+```
+
+The exact container name may include the directory or Compose project name used by the host.
+
+### Reset the local environment and initialize it again
+
+Use this sequence when the database and local queues must be recreated from zero:
+
+```bash
+docker compose down -v --remove-orphans
+docker compose up -d postgres
+docker compose ps postgres
+
+docker compose up -d keycloak localstack
+docker compose ps keycloak localstack
+
+docker compose up -d --build api consumer publisher reference-worker swagger
+docker compose ps
+```
+
+The `-v` flag removes the PostgreSQL volume and all local financial data, including wallets, wagering transactions, ledger entries, Inbox records and outbox events. On the next PostgreSQL startup, the Compose-mounted migrations run again automatically.
+
+The `api2` service is intentionally not part of the normal startup sequence. Start it only when running the distributed concurrency acceptance test:
+
+```bash
+docker compose up -d --build api api2 consumer publisher reference-worker swagger
+```
+
+It exposes the second API instance on `http://localhost:8083`.
+
+### Run processes individually
+
+Each process can also be started directly with Go, but this is not the recommended local workflow because PostgreSQL, Keycloak, LocalStack, environment variables and queues must already be available:
+
+```bash
+go run ./cmd/api
+go run ./cmd/consumer
+go run ./cmd/publisher
+go run ./cmd/reference-worker
+SWAGGER_ADDR=:8082 go run ./cmd/swagger
+```
+
+The individual processes have these access characteristics:
+
+| Process | Command | Port |
+| --- | --- | --- |
+| API | `go run ./cmd/api` | `:8080` |
+| Consumer | `go run ./cmd/consumer` | no HTTP port |
+| Publisher | `go run ./cmd/publisher` | no HTTP port |
+| Reference worker | `go run ./cmd/reference-worker` | no HTTP port |
+| Swagger | `SWAGGER_ADDR=:8082 go run ./cmd/swagger` | `:8082` |
+
+Do not run the API and Swagger directly with the same default address. When using the individual-process mode, configure the required environment variables explicitly and keep PostgreSQL, Keycloak and LocalStack running through Docker Compose.
+
 ## Code quality and validation
 
 The root `Makefile` centralizes the development and validation commands. The complete lint pipeline is executed with:
